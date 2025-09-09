@@ -411,8 +411,8 @@ def twoTierFilterContacts(inputFile: str, outputFile: str, removeListFile: str =
 
 def main():
     """Main function to execute the two-tier filtering"""
-    inputFile = "AI list- Family offices (002).xlsx"
-    outputFile = "Two_Tier_Filtered_Family_Office_Contacts.xlsx"
+    inputFile = "input/AI list- Family offices (002).xlsx"
+    outputFile = "output/Two_Tier_Filtered_Family_Office_Contacts.xlsx"
     
     # Check if input file exists
     if not Path(inputFile).exists():
