@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Bucket Overflow Excel Contact Filter Script
+Bucket Overflow Excel Contact Filter Script v5
 Creates two tiers of filtered contacts with bucket overflow approach:
-- Tier 1: Key contacts (CIO, Hedge fund, private credit, fixed income, private debt, alternatives, head of investments, head of research) - max 10 per firm
-- Tier 2: Junior contacts (research, portfolio, investment, analyst, associate) - max 6 total per firm
+- Tier 1: Key contacts (CIO, hedge/hedge fund, credit/private credit, private debt, fixed income, income, private, markets, managing director, alternatives, absolute return, head of investments, head of research, senior portfolio manager, investment director) - max 10 per firm
+- Tier 2: Junior contacts (research, portfolio, investment, analyst, associate) - max 16 total per firm (uses unused Tier 1 slots)
 """
 
 import pandas as pd
@@ -21,11 +21,11 @@ def createTier1Filter() -> Dict[str, Any]:
     """
     return {
         'name': 'Tier 1 - Key Contacts',
-        'description': 'Most important key contacts: CIO, Hedge fund, private credit, fixed income, private debt, alternatives, head of investments, head of research',
-        'job_title_pattern': r".*\b(cio|c\.i\.o\.|c\.i\.o|chief\s+investment\s+officer|hedge\s+fund|private\s+credit|private\s+debt|fixed\s+income|alternatives?[\s-]?investments?|alternatives?|head\s+of\s+investments?|head\s+of\s+research|investment\s+committee|investment\s+partner)\b",
-        'exclusion_pattern': r".*\b(operations?|hr|human\s+resources?|investor\s+relations?|client\s+relations?|marketing|sales|compliance|technology|administrator|assistant|associate\s+director|associate\s+vice\s+president|managing\s+director)\b",
+        'description': 'Most important key contacts: CIO, hedge/hedge fund, credit/private credit, private debt, fixed income, income, private, markets, managing director, alternatives, absolute return, head of investments, head of research, senior portfolio manager, investment director',
+        'job_title_pattern': r".*\b(cio|c\.i\.o\.|c\.i\.o|chief\s+investment\s+officer|hedge|hedge\s+fund|credit|private\s+credit|private\s+debt|fixed\s+income|income|private|markets?|managing\s+director|alternatives?[\s-]?investments?|alternatives?|absolute|absolute\s+return|head\s+of\s+investments?|head\s+of\s+research|investment\s+committee|investment\s+partner|senior\s+portfolio\s+manager|investment\s+director)\b",
+        'exclusion_pattern': r"^$",  # No exclusions for Tier 1
         'required_role_terms': ['investment team', 'investment', 'portfolio', 'research'],
-        'priority_keywords': ['cio', 'hedge fund', 'private credit', 'private debt', 'fixed income', 'alternatives', 'head of investments', 'head of research']
+        'priority_keywords': ['cio', 'hedge', 'hedge fund', 'credit', 'private credit', 'private debt', 'fixed income', 'income', 'private', 'markets', 'managing director', 'alternatives', 'absolute', 'absolute return', 'head of investments', 'head of research', 'senior portfolio manager', 'investment director']
     }
 
 def createTier2Filter() -> Dict[str, Any]:
@@ -39,7 +39,7 @@ def createTier2Filter() -> Dict[str, Any]:
         'name': 'Tier 2 - Junior Contacts',
         'description': 'Junior investment professionals, excluding operations/HR',
         'job_title_pattern': r".*\b(research|portfolio|investment|analyst|associate|coordinator|specialist|advisor|representative|assistant\s+portfolio\s+manager|investment\s+analyst|research\s+analyst|portfolio\s+analyst|investment\s+advisor|wealth\s+advisor|trust\s+officer)\b",
-        'exclusion_pattern': r".*\b(operations?|hr|human\s+resources?|investor\s+relations?|client\s+relations?|marketing|sales|compliance|technology|administrator|assistant|cio|chief\s+investment\s+officer|hedge\s+fund|private\s+credit|private\s+debt|fixed\s+income|alternatives?|head\s+of\s+investments?|head\s+of\s+research|managing\s+director|investment\s+director|president|vice\s+president|executive\s+vice\s+president|senior\s+vice\s+president|director\s+of\s+investments?|senior\s+director)\b",
+        'exclusion_pattern': r".*\b(operations?|hr|human\s+resources?|investor\s+relations?|client\s+relations?|marketing|sales|compliance|technology|administrator|assistant|cio|c\.i\.o\.|c\.i\.o|chief\s+investment\s+officer|hedge|hedge\s+fund|credit|private\s+credit|private\s+debt|fixed\s+income|income|private|markets?|managing\s+director|alternatives?|absolute|absolute\s+return|head\s+of\s+investments?|head\s+of\s+research|investment\s+committee|investment\s+partner|senior\s+portfolio\s+manager|investment\s+director|president|vice\s+president|executive\s+vice\s+president|senior\s+vice\s+president|director\s+of\s+investments?|senior\s+director)\b",
         'required_role_terms': ['investment team', 'investment', 'portfolio', 'research'],
         'priority_keywords': ['research', 'portfolio', 'investment', 'analyst', 'associate']
     }
@@ -129,7 +129,7 @@ def applyBucketOverflowFilter(df: pd.DataFrame, tier1Config: Dict[str, Any], tie
     """
     Apply bucket overflow filtering approach:
     - Tier 1: Key contacts only (max 10 per firm, don't fill if fewer match)
-    - Tier 2: Tier 1 overflow + junior contacts (max 6 total per firm)
+    - Tier 2: Junior contacts can use unused Tier 1 slots (max 16 total per firm: 10 Tier 1 + 6 Tier 2)
     
     Args:
         df: Input dataframe
@@ -155,7 +155,13 @@ def applyBucketOverflowFilter(df: pd.DataFrame, tier1Config: Dict[str, Any], tie
         tier1FirmCount = len(tier1FirmContacts)
         print(f"  Tier 1 key contacts found: {tier1FirmCount}")
         
-        # Step 2: Get remaining contacts for Tier 2
+        # Step 2: Calculate remaining slots for Tier 2
+        # Tier 2 can use unused Tier 1 slots + its own 6 slots = max 16 total
+        tier1UnusedSlots = 10 - tier1FirmCount
+        tier2MaxSlots = tier1UnusedSlots + 6  # Unused Tier 1 slots + 6 Tier 2 slots
+        print(f"  Tier 1 unused slots: {tier1UnusedSlots}, Tier 2 max slots: {tier2MaxSlots}")
+        
+        # Step 3: Get remaining contacts for Tier 2
         tier1Ids = set()
         if 'CONTACT_ID' in tier1FirmContacts.columns:
             tier1Ids = set(tier1FirmContacts['CONTACT_ID'].tolist())
@@ -164,12 +170,12 @@ def applyBucketOverflowFilter(df: pd.DataFrame, tier1Config: Dict[str, Any], tie
         if tier1Ids:
             remainingContacts = remainingContacts[~remainingContacts['CONTACT_ID'].isin(tier1Ids)]
         
-        # Step 3: Apply Tier 2 filter to remaining contacts
-        tier2FirmContacts = applyTierFilter(remainingContacts, tier2Config, maxContactsPerFirm=6)
+        # Step 4: Apply Tier 2 filter to remaining contacts with overflow slots
+        tier2FirmContacts = applyTierFilter(remainingContacts, tier2Config, maxContactsPerFirm=tier2MaxSlots)
         tier2FirmCount = len(tier2FirmContacts)
         print(f"  Tier 2 junior contacts found: {tier2FirmCount}")
         
-        # Step 4: Combine with existing results
+        # Step 5: Combine with existing results
         if not tier1FirmContacts.empty:
             tier1Df = pd.concat([tier1Df, tier1FirmContacts], ignore_index=True)
         if not tier2FirmContacts.empty:
@@ -314,7 +320,7 @@ def twoTierFilterContacts(inputFile: str, outputFile: str, removeListFile: str =
         print(f"Original contacts: {originalCount:,}")
         print(f"After firm exclusion: {len(dfFiltered):,}")
         print(f"Tier 1 (Key Contacts): {len(tier1Df):,} (max 10 per firm, key titles only)")
-        print(f"Tier 2 (Junior Contacts): {len(tier2Df):,} (max 6 total per firm)")
+        print(f"Tier 2 (Junior Contacts): {len(tier2Df):,} (max 16 total per firm, uses unused Tier 1 slots)")
         print(f"Total filtered contacts: {len(tier1Df) + len(tier2Df):,}")
         print(f"Duplicates between tiers: 0 (ensured)")
         
@@ -412,7 +418,7 @@ def twoTierFilterContacts(inputFile: str, outputFile: str, removeListFile: str =
 def main():
     """Main function to execute the two-tier filtering"""
     inputFile = "input/AI list- Family offices (002).xlsx"
-    outputFile = "output/Two_Tier_Filtered_Family_Office_Contacts.xlsx"
+    outputFile = "output/Two_Tier_Filtered_Family_Office_Contacts_v5.xlsx"
     
     # Check if input file exists
     if not Path(inputFile).exists():
@@ -428,8 +434,8 @@ def main():
     print("1. EXCLUDE specific firm names")
     print("2. REQUIRE 'Investment Team' in ROLE column")
     print("3. APPLY bucket overflow filtering:")
-    print("   - Tier 1: Key contacts (CIO, Hedge fund, private credit, fixed income, private debt, alternatives, head of investments, head of research) - max 10 per firm")
-    print("   - Tier 2: Junior contacts (research, portfolio, investment, analyst, associate) - max 6 total per firm")
+    print("   - Tier 1: Key contacts (CIO, hedge, credit, private credit, private debt, fixed income, alternatives, absolute return, head of investments, head of research, senior portfolio manager, investment director) - max 10 per firm")
+    print("   - Tier 2: Junior contacts (research, portfolio, investment, analyst, associate) - max 16 total per firm (uses unused Tier 1 slots)")
     print("4. ENSURE no duplicates between tiers")
     print()
     
