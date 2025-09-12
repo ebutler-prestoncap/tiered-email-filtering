@@ -1,70 +1,82 @@
-# Family Office Tiered Contact Filter
+# Consolidated Tiered Contact Filter
 
-A specialized Python tool for implementing bucket overflow filtering on family office contact databases. This tool creates two tiers of filtered contacts based on importance and seniority.
+## 🚀 Current System (Simplified & Unified)
 
-## Overview
+This project has been streamlined to use a **single consolidated filtering tool** that replaces all previous filtering scripts with unified logic.
 
-This tool implements a "bucket overflow" approach to contact filtering:
+### 📁 Active Files
+- **`consolidated_tiered_filter.py`** - Main filtering tool (handles all contact types)
+- **`test_consolidated_filter.py`** - Test suite and validation
+- **`README_CONSOLIDATED.md`** - Detailed documentation
+- **`requirements.txt`** - Python dependencies
 
-- **Tier 1 (Key Contacts)**: Most important contacts (CIO, hedge fund, private credit, fixed income, private debt, alternatives, head of investments, head of research) - max 10 per firm
-- **Tier 2 (Junior Contacts)**: Remaining contacts that match junior criteria (research, portfolio, investment, analyst, associate) - max 6 total per firm
-
-## Key Features
-
-- **Bucket Overflow Logic**: Tier 1 acts as a bucket that can overflow into Tier 2
-- **Firm-Based Processing**: Each firm is processed separately with individual limits
-- **Priority-Based Selection**: Contacts are ranked by importance within each tier
-- **No Duplicates**: Ensures no contact appears in both tiers
-- **Comprehensive Reporting**: Detailed statistics and sample outputs
-
-## Installation
-
-```bash
-pip install -r requirements.txt
+### 🗂️ Directory Structure
+```
+tiered-email-filtering/
+├── consolidated_tiered_filter.py    # Main tool
+├── test_consolidated_filter.py      # Testing
+├── README_CONSOLIDATED.md           # Full documentation  
+├── requirements.txt                 # Dependencies
+├── input/                          # Place Excel files here
+├── output/                         # Results saved here
+└── archive/                        # Legacy files (archived)
+    ├── legacy_filters/             # Old filtering scripts
+    ├── comparison_tools/           # Analysis utilities  
+    ├── documentation/              # Old documentation
+    └── ARCHIVE_SUMMARY.md          # Archive details
 ```
 
-## Usage
+## 🎯 Quick Start
 
-```bash
-python two_tier_filter_contacts.py
-```
+1. **Install Requirements**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-The script will process `AI list- Family offices (002).xlsx` and generate `Two_Tier_Filtered_Family_Office_Contacts.xlsx` with separate sheets for each tier.
+2. **Add Input Files**: Place Excel files in the `input/` folder
 
-## Input Requirements
+3. **Run Filtering**:
+   ```bash
+   python3 consolidated_tiered_filter.py
+   ```
 
-- Excel file with "Contacts_Export" sheet
-- Required columns: CONTACT_ID, INVESTOR, NAME, JOB TITLE, ROLE, EMAIL
-- Contacts must have "Investment Team" in ROLE column
+4. **Results**: Check the `output/` folder for timestamped results
 
-## Output
+## ✨ Key Features
 
-- **Tier1_Key_Contacts**: High-priority contacts (max 10 per firm)
-- **Tier2_Junior_Contacts**: Junior contacts (max 6 total per firm)
-- **Filtering_Summary**: Statistics and metrics
+- ✅ **Unified Logic**: Single tool handles all contact types  
+- ✅ **Smart Deduplication**: Removes duplicates by name + firm
+- ✅ **Two-Tier System**: Key contacts (Tier 1) vs Junior contacts (Tier 2)
+- ✅ **Email Pattern Extraction**: Analyzes full dataset to extract firm email patterns
+- ✅ **Missing Email Filling**: Uses patterns to fill missing emails
+- ✅ **Firm Limits**: Max 10 Tier 1 + 6 Tier 2 contacts per firm
+- ✅ **Multiple Input Support**: Combines multiple Excel files automatically
 
-## Filtering Criteria
+## 📊 Filtering Logic
 
-### Tier 1 (Key Contacts)
-- CIO, Chief Investment Officer
-- Hedge fund
-- Private credit, Private debt, Fixed income
-- Alternatives, Head of investments, Head of research
-- Investment committee, Investment partner
-- **Excludes**: Managing directors, operations, HR, marketing, sales
+### Tier 1: Key Contacts
+- **No investment team requirement** (prioritizes important titles)
+- Max 10 contacts per firm
+- Targets: CIO, Managing Director, Head of Investments, Portfolio Manager, etc.
 
-### Tier 2 (Junior Contacts)
-- Research, Portfolio, Investment
-- Analyst, Associate, Coordinator, Specialist
-- Investment advisor, Wealth advisor, Trust officer
-- **Excludes**: All Tier 1 titles, managing directors, operations, HR
+### Tier 2: Junior Contacts  
+- **Must be on investment team** (prevents overly broad filtering)
+- Max 6 contacts per firm
+- Targets: Analysts, Associates, Directors, Advisors, etc.
 
-## Dependencies
+## 🗄️ Archived Components
 
-- pandas
-- xlsxwriter
-- openpyxl
+All legacy filtering tools have been archived in the `archive/` folder:
+- **17 Python files** moved to organized subdirectories
+- **4 documentation files** preserved for reference
+- **Complete functionality** available if needed for reference
 
-## License
+See `archive/ARCHIVE_SUMMARY.md` for detailed archive information.
 
-MIT License
+## 📖 Full Documentation
+
+For complete usage instructions, see **`README_CONSOLIDATED.md`**
+
+---
+
+*This consolidated system replaces all previous filtering tools with a single, unified approach that maintains functionality while dramatically simplifying the codebase.*

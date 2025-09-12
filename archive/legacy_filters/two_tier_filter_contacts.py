@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bucket Overflow Excel Contact Filter Script v5
+Bucket Overflow Excel Contact Filter Script v6
 Creates two tiers of filtered contacts with bucket overflow approach:
 - Tier 1: Key contacts (CIO, hedge/hedge fund, credit/private credit, private debt, fixed income, income, private, markets, managing director, alternatives, absolute return, head of investments, head of research, senior portfolio manager, investment director) - max 10 per firm
 - Tier 2: Junior contacts (research, portfolio, investment, analyst, associate) - max 16 total per firm (uses unused Tier 1 slots)
@@ -93,16 +93,38 @@ def applyTierFilter(df: pd.DataFrame, tierConfig: Dict[str, Any], maxContactsPer
             job_title = str(row.get('JOB TITLE', '')).lower()
             priority_score = 0
             
-            # Higher priority for more senior terms
-            for keyword in tierConfig['priority_keywords']:
-                if keyword.lower() in job_title:
-                    priority_score += 10
+            # Tier 1: Highest priority roles (score 100+)
+            if 'cio' in job_title or 'chief investment officer' in job_title:
+                priority_score += 100
+            if 'head of investments' in job_title or 'head of research' in job_title:
+                priority_score += 90
+            if 'investment committee' in job_title or 'investment partner' in job_title:
+                priority_score += 85
+            if 'senior portfolio manager' in job_title or 'investment director' in job_title:
+                priority_score += 80
             
-            # Additional priority for specific high-value terms
-            high_value_terms = ['cio', 'chief investment officer', 'managing director', 'president', 'vice president']
-            for term in high_value_terms:
-                if term in job_title:
-                    priority_score += 5
+            # Tier 2: High priority investment focus areas (score 70-79)
+            if 'hedge fund' in job_title or 'hedge' in job_title:
+                priority_score += 75
+            if 'private credit' in job_title or 'private debt' in job_title:
+                priority_score += 75
+            if 'alternatives' in job_title or 'absolute return' in job_title:
+                priority_score += 70
+            if 'fixed income' in job_title:
+                priority_score += 70
+            
+            # Tier 3: Medium priority roles (score 50-69)
+            if 'managing director' in job_title:
+                priority_score += 60
+            if 'credit' in job_title or 'income' in job_title:
+                priority_score += 55
+            if 'private' in job_title or 'markets' in job_title:
+                priority_score += 50
+            
+            # Base score for other Tier 1 keywords
+            for keyword in tierConfig['priority_keywords']:
+                if keyword.lower() in job_title and priority_score == 0:
+                    priority_score += 10
             
             return priority_score
         
@@ -249,7 +271,21 @@ def twoTierFilterContacts(inputFile: str, outputFile: str, removeListFile: str =
             "Twin Focus Capital Partners",
             "Stelac Advisory Services",
             "Waterloo Capital",
-            "Pennington Partners & Co"
+            "Pennington Partners & Co",
+            # Additional firms to exclude (added v7)
+            "Mariner Wealth Advisors",
+            "Bessemer Trust", 
+            "Bitterroot",
+            "CM wealth advisors",
+            "Cerity Partners",
+            "Goldman Sachs",
+            "Halbert",
+            "Jefferson River Capital",
+            "Northern Trust",
+            "Pin Oak",
+            "Sanctuary Wealth",
+            "Turtle Creek",
+            "Waycrosse"
         ]
         
         # Create exclusion pattern
@@ -418,7 +454,7 @@ def twoTierFilterContacts(inputFile: str, outputFile: str, removeListFile: str =
 def main():
     """Main function to execute the two-tier filtering"""
     inputFile = "input/AI list- Family offices (002).xlsx"
-    outputFile = "output/Two_Tier_Filtered_Family_Office_Contacts_v5.xlsx"
+    outputFile = "output/Two_Tier_Filtered_Family_Office_Contacts_v7.xlsx"
     
     # Check if input file exists
     if not Path(inputFile).exists():
