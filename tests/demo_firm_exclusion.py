@@ -4,14 +4,17 @@ Demo script showing firm exclusion functionality
 Run this to test firm exclusion without interactive prompts
 """
 
-from unified_tiered_filter import UnifiedTieredFilter
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from tiered_filter import TieredFilter
 
-def demo_unified_with_exclusion():
-    """Demo unified filter with firm exclusion enabled"""
-    print("🚀 DEMO: Unified Filter WITH Firm Exclusion")
+def demo_with_exclusion():
+    """Demo filter with firm exclusion enabled"""
+    print("🚀 DEMO: Tiered Filter WITH Firm Exclusion")
     print("=" * 60)
     
-    filter_tool = UnifiedTieredFilter()
+    filter_tool = TieredFilter()
     try:
         output_file = filter_tool.process_contacts(
             user_prefix="Unified-With-Exclusion", 
@@ -21,12 +24,12 @@ def demo_unified_with_exclusion():
     except Exception as e:
         print(f"❌ Error: {e}")
 
-def demo_unified_without_exclusion():
-    """Demo unified filter without firm exclusion"""
-    print("\n🚀 DEMO: Unified Filter WITHOUT Firm Exclusion")
+def demo_without_exclusion():
+    """Demo filter without firm exclusion"""
+    print("\n🚀 DEMO: Tiered Filter WITHOUT Firm Exclusion")
     print("=" * 60)
     
-    filter_tool = UnifiedTieredFilter()
+    filter_tool = TieredFilter()
     try:
         output_file = filter_tool.process_contacts(
             user_prefix="Unified-No-Exclusion", 
@@ -37,16 +40,15 @@ def demo_unified_without_exclusion():
         print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
-    print("🎯 FIRM EXCLUSION DEMO - Using Unified Filter (Recommended)")
+    print("🎯 FIRM EXCLUSION DEMO")
     print("This demo shows the difference between running with and without firm exclusion")
     print("Check the output files to see the difference in contact counts\n")
     
     # Run both demos
-    demo_unified_with_exclusion()
-    demo_unified_without_exclusion()
+    demo_with_exclusion()
+    demo_without_exclusion()
     
     print("\n" + "=" * 60)
     print("🎉 Demo completed! Check the output folder for results.")
     print("Files ending with 'With-Exclusion' will have fewer contacts from excluded firms.")
     print("Files ending with 'No-Exclusion' will have all contacts.")
-    print("\n📝 Note: This demo uses the UNIFIED filter (recommended stable version)")
