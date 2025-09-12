@@ -1,20 +1,20 @@
 # Consolidated Tiered Contact Filter
 
-## 🚀 Current System (Simplified & Unified)
+## 🚀 Current System (Unified & Stable)
 
-This project has been streamlined to use a **single consolidated filtering tool** that replaces all previous filtering scripts with unified logic.
+This project uses a **stable unified filtering tool** that has been tested and proven reliable for contact processing.
 
 ### 📁 Active Files
-- **`consolidated_tiered_filter.py`** - Main filtering tool (handles all contact types)
-- **`test_consolidated_filter.py`** - Test suite and validation
-- **`README_CONSOLIDATED.md`** - Detailed documentation
+- **`unified_tiered_filter.py`** - **RECOMMENDED** Main filtering tool (stable, tested)
+- **`consolidated_tiered_filter.py`** - Alternative implementation (experimental)
+- **`README_CONSOLIDATED.md`** - Documentation for both tools
 - **`requirements.txt`** - Python dependencies
 
 ### 🗂️ Directory Structure
 ```
 tiered-email-filtering/
-├── consolidated_tiered_filter.py    # Main tool
-├── test_consolidated_filter.py      # Testing
+├── unified_tiered_filter.py         # RECOMMENDED - Stable main tool
+├── consolidated_tiered_filter.py    # Experimental alternative
 ├── README_CONSOLIDATED.md           # Full documentation  
 ├── requirements.txt                 # Dependencies
 ├── input/                          # Place Excel files here
@@ -35,7 +35,12 @@ tiered-email-filtering/
 
 2. **Add Input Files**: Place Excel files in the `input/` folder
 
-3. **Run Filtering**:
+3. **Run Filtering** (Recommended):
+   ```bash
+   python3 unified_tiered_filter.py
+   ```
+   
+   *Alternative (experimental):*
    ```bash
    python3 consolidated_tiered_filter.py
    ```
@@ -51,6 +56,7 @@ tiered-email-filtering/
 - ✅ **Missing Email Filling**: Uses patterns to fill missing emails
 - ✅ **Firm Limits**: Max 10 Tier 1 + 6 Tier 2 contacts per firm
 - ✅ **Multiple Input Support**: Combines multiple Excel files automatically
+- ✅ **Optional Firm Exclusion**: Exclude specific firms using `firm exclusion.csv`
 
 ## 📊 Filtering Logic
 

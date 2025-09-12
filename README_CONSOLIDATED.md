@@ -2,7 +2,11 @@
 
 ## Overview
 
-A unified filtering tool that consolidates all contact sources into a single tiered output with intelligent email pattern extraction and missing email filling capabilities.
+This document covers two filtering implementations:
+- **`unified_tiered_filter.py`** - **RECOMMENDED** Stable, tested implementation
+- **`consolidated_tiered_filter.py`** - Experimental alternative with known issues
+
+Both tools provide tiered contact filtering with email pattern extraction and firm exclusion capabilities.
 
 ## Key Features
 
@@ -13,16 +17,23 @@ A unified filtering tool that consolidates all contact sources into a single tie
 ✅ **Email Pattern Extraction**: Analyzes full dataset to extract firm-specific email patterns  
 ✅ **Missing Email Filling**: Uses extracted patterns to fill missing emails for final contacts  
 ✅ **Firm-Based Limits**: Max 10 Tier 1 contacts and max 6 Tier 2 contacts per firm  
+✅ **Optional Firm Exclusion**: Choose to exclude specific firms using `firm exclusion.csv`  
 
 ## Usage
 
-### Basic Usage
+### Basic Usage (Recommended)
+```bash
+python3 unified_tiered_filter.py
+```
+
+### Alternative Usage (Experimental)
 ```bash
 python3 consolidated_tiered_filter.py
 ```
 
 ### File Organization
 - **Input**: Place Excel files in `/input` folder
+- **Firm Exclusion**: Optional `firm exclusion.csv` file in `/input` folder for excluding specific firms
 - **Output**: Results saved to `/output` folder with timestamped names
 
 ### Output Naming
@@ -66,10 +77,23 @@ The system analyzes the **full combined dataset** to extract email patterns by f
 ## Data Processing Pipeline
 
 ```
-Input Files → Combine → Standardize Columns → Remove Duplicates → Extract Email Patterns
+Input Files → Combine → Standardize Columns → Remove Duplicates → [Optional: Firm Exclusion] → Extract Email Patterns
      ↓
 Apply Tier 1 Filter → Apply Tier 2 Filter → Fill Missing Emails → Generate Output
 ```
+
+## Firm Exclusion Feature
+
+### Setup
+1. Place a file named `firm exclusion.csv` in the `/input` folder
+2. List firm names to exclude, one per line (see example in current `/input` folder)
+3. Run the filtering tool and choose "yes" when prompted for firm exclusion
+
+### How It Works
+- **Case-insensitive matching**: "Goldman Sachs" matches "goldman sachs" in data
+- **Applied after deduplication**: Ensures clean exclusion without double-counting
+- **Complete firm exclusion**: All contacts from excluded firms are removed
+- **Logged results**: Shows which excluded firms were found and removed
 
 ## Output Structure
 

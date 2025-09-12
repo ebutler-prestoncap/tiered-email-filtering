@@ -48,6 +48,86 @@ class UnifiedTieredFilter:
         # Toggle email filling (disabled for testing to avoid confusion)
         self.enable_email_fill = False
         
+        # Firm exclusion settings
+        self.enable_firm_exclusion = False
+        self.excluded_firms = set()
+        
+    def load_firm_exclusion_list(self) -> None:
+        """Load firm exclusion list from CSV file"""
+        exclusion_file = self.input_folder / "firm exclusion.csv"
+        
+        if not exclusion_file.exists():
+            logger.warning(f"Firm exclusion file not found: {exclusion_file}")
+            return
+        
+        try:
+            # Read CSV file - it's a simple single column list
+            with open(exclusion_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            # Clean and normalize firm names
+            excluded_firms = set()
+            for line in lines:
+                firm_name = line.strip()
+                if firm_name:  # Skip empty lines
+                    # Normalize for matching (lowercase, remove extra whitespace)
+                    normalized_name = firm_name.lower().strip()
+                    excluded_firms.add(normalized_name)
+                    # Also store original case for logging
+                    self.excluded_firms.add(firm_name.strip())
+            
+            # Store normalized versions for matching
+            self.excluded_firms_normalized = excluded_firms
+            
+            logger.info(f"Loaded {len(self.excluded_firms)} firms from exclusion list")
+            logger.info(f"Sample excluded firms: {list(self.excluded_firms)[:5]}...")
+            
+        except Exception as e:
+            logger.error(f"Error loading firm exclusion list: {e}")
+            self.excluded_firms = set()
+            self.excluded_firms_normalized = set()
+    
+    def apply_firm_exclusion(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply firm exclusion filtering"""
+        if not self.enable_firm_exclusion or not hasattr(self, 'excluded_firms_normalized'):
+            return df
+        
+        if len(df) == 0:
+            return df
+        
+        logger.info(f"Applying firm exclusion to {len(df)} contacts")
+        
+        # Create mask for non-excluded firms
+        if 'INVESTOR' not in df.columns:
+            logger.warning("No INVESTOR column found for firm exclusion")
+            return df
+        
+        def is_firm_excluded(firm_name):
+            if pd.isna(firm_name) or firm_name == '':
+                return False
+            
+            normalized_firm = str(firm_name).lower().strip()
+            return normalized_firm in self.excluded_firms_normalized
+        
+        # Apply exclusion filter
+        mask = ~df['INVESTOR'].apply(is_firm_excluded)
+        filtered_df = df[mask].copy()
+        
+        excluded_count = len(df) - len(filtered_df)
+        logger.info(f"Excluded {excluded_count} contacts from {len(self.excluded_firms)} excluded firms")
+        
+        if excluded_count > 0:
+            # Log some examples of excluded firms found in data
+            excluded_firms_found = set()
+            for _, row in df[~mask].iterrows():
+                firm = str(row.get('INVESTOR', '')).strip()
+                if firm:
+                    excluded_firms_found.add(firm)
+            
+            logger.info(f"Excluded firms found in data: {list(excluded_firms_found)[:5]}...")
+        
+        return filtered_df
+        
     def clean_and_archive_output(self) -> None:
         """Clean output folder and archive previous runs with organized structure"""
         logger.info("Cleaning output folder and archiving previous runs")
@@ -302,6 +382,11 @@ class UnifiedTieredFilter:
         logger.info(f"Loading files from {self.input_folder}")
         
         excel_files = list(self.input_folder.glob("*.xlsx"))
+        # Exclude any CSV files from processing (like firm exclusion.csv)
+        csv_files = list(self.input_folder.glob("*.csv"))
+        if csv_files:
+            logger.info(f"Found {len(csv_files)} CSV files in input folder - these will be ignored for contact processing: {[f.name for f in csv_files]}")
+        
         if not excel_files:
             raise FileNotFoundError(f"No Excel files found in {self.input_folder}")
         
@@ -694,7 +779,7 @@ class UnifiedTieredFilter:
             # Processing summary
             total_raw = sum(info['contacts'] for info in file_info)
             
-            # Calculate firm/institution counts
+            # Calculate firm/institution counts and statistics
             raw_firms = set()
             for info in file_info:
                 # Estimate firms from file info if available
@@ -703,12 +788,36 @@ class UnifiedTieredFilter:
             
             # Calculate unique firms after deduplication
             unique_firms_after_dedup = 0
+            avg_contacts_per_firm_before = 0
+            median_contacts_per_firm_before = 0
+            
             if deduplicated_df is not None and 'INVESTOR' in deduplicated_df.columns and len(deduplicated_df) > 0:
                 unique_firms_after_dedup = deduplicated_df['INVESTOR'].nunique()
+                
+                # Calculate average and median contacts per firm before filtering
+                firm_contact_counts_before = deduplicated_df['INVESTOR'].value_counts()
+                avg_contacts_per_firm_before = firm_contact_counts_before.mean()
+                median_contacts_per_firm_before = firm_contact_counts_before.median()
             
-            # Calculate tier-specific firm counts
+            # Calculate tier-specific firm counts and statistics
             tier1_firms = tier1_df['INVESTOR'].nunique() if 'INVESTOR' in tier1_df.columns and len(tier1_df) > 0 else 0
             tier2_firms = tier2_df['INVESTOR'].nunique() if 'INVESTOR' in tier2_df.columns and len(tier2_df) > 0 else 0
+            
+            # Calculate tier-specific averages and medians
+            avg_contacts_per_firm_tier1 = 0
+            median_contacts_per_firm_tier1 = 0
+            avg_contacts_per_firm_tier2 = 0
+            median_contacts_per_firm_tier2 = 0
+            
+            if len(tier1_df) > 0 and 'INVESTOR' in tier1_df.columns:
+                tier1_firm_counts = tier1_df['INVESTOR'].value_counts()
+                avg_contacts_per_firm_tier1 = tier1_firm_counts.mean()
+                median_contacts_per_firm_tier1 = tier1_firm_counts.median()
+            
+            if len(tier2_df) > 0 and 'INVESTOR' in tier2_df.columns:
+                tier2_firm_counts = tier2_df['INVESTOR'].value_counts()
+                avg_contacts_per_firm_tier2 = tier2_firm_counts.mean()
+                median_contacts_per_firm_tier2 = tier2_firm_counts.median()
             
             # Calculate unique firms across both tiers (avoiding double counting)
             if len(tier1_df) > 0 and len(tier2_df) > 0 and 'INVESTOR' in tier1_df.columns and 'INVESTOR' in tier2_df.columns:
@@ -717,17 +826,36 @@ class UnifiedTieredFilter:
             else:
                 total_firms_filtered = tier1_firms + tier2_firms
             
+            # Calculate firm exclusion statistics
+            firms_excluded_count = 0
+            contacts_excluded_count = 0
+            if self.enable_firm_exclusion and hasattr(self, 'excluded_firms'):
+                firms_excluded_count = len(self.excluded_firms)
+                # Calculate contacts excluded: difference between before and after exclusion
+                if hasattr(self, 'pre_exclusion_count'):
+                    contacts_excluded_count = self.pre_exclusion_count - len(deduplicated_df) if deduplicated_df is not None else 0
+            
             summary_data = {
                 'Step': [
                     '📁 Input Files',
                     '📊 Total Raw Contacts',
                     '✅ Unique Contacts After Deduplication',
                     '🏢 Unique Firms/Institutions After Deduplication',
+                    '📊 Avg Contacts per Firm (Before Filtering)',
+                    '📊 Median Contacts per Firm (Before Filtering)',
+                    '',
+                    '🚫 Firm Exclusion Applied',
+                    '🚫 Firms Excluded',
+                    '🚫 Contacts Excluded by Firm Filter',
                     '',
                     '🎯 Tier 1 (Key Contacts)',
                     '🏢 Tier 1 Firms/Institutions',
+                    '📊 Avg Contacts per Firm (Tier 1)',
+                    '📊 Median Contacts per Firm (Tier 1)',
                     '🎯 Tier 2 (Junior Contacts)',
                     '🏢 Tier 2 Firms/Institutions', 
+                    '📊 Avg Contacts per Firm (Tier 2)',
+                    '📊 Median Contacts per Firm (Tier 2)',
                     '📈 Total Filtered Contacts',
                     '🏢 Total Firms/Institutions (Both Tiers)',
                     '📊 Retention Rate',
@@ -742,11 +870,21 @@ class UnifiedTieredFilter:
                     f"{total_raw:,}",
                     f"{dedup_count:,}",
                     f"{unique_firms_after_dedup:,}",
+                    f"{avg_contacts_per_firm_before:.1f}",
+                    f"{median_contacts_per_firm_before:.1f}",
+                    '',
+                    "Yes" if self.enable_firm_exclusion else "No",
+                    f"{firms_excluded_count:,}" if self.enable_firm_exclusion else "0",
+                    f"{contacts_excluded_count:,}" if self.enable_firm_exclusion else "0",
                     '',
                     len(tier1_df),
                     f"{tier1_firms:,}",
+                    f"{avg_contacts_per_firm_tier1:.1f}",
+                    f"{median_contacts_per_firm_tier1:.1f}",
                     len(tier2_df),
                     f"{tier2_firms:,}",
+                    f"{avg_contacts_per_firm_tier2:.1f}",
+                    f"{median_contacts_per_firm_tier2:.1f}",
                     len(tier1_df) + len(tier2_df),
                     f"{total_firms_filtered:,}",
                     f"{((len(tier1_df) + len(tier2_df)) / total_raw * 100):.1f}%" if total_raw > 0 else "0.0%",
@@ -879,9 +1017,16 @@ class UnifiedTieredFilter:
         
         return analysis
     
-    def process_contacts(self, user_prefix: str = None) -> str:
+    def process_contacts(self, user_prefix: str = None, enable_firm_exclusion: bool = False) -> str:
         """Main processing function"""
         logger.info("Starting unified tiered filtering process")
+        
+        # Set firm exclusion setting
+        self.enable_firm_exclusion = enable_firm_exclusion
+        
+        # Load firm exclusion list if enabled
+        if self.enable_firm_exclusion:
+            self.load_firm_exclusion_list()
         
         # 0. Clean output folder and archive previous runs
         self.clean_and_archive_output()
@@ -895,6 +1040,15 @@ class UnifiedTieredFilter:
         # 3. Remove duplicates using standardized columns (NAME + INVESTOR)
         deduplicated_df = self.remove_duplicates(standardized_df)
         dedup_count = len(deduplicated_df)
+        
+        # 3.5. Apply firm exclusion if enabled
+        if self.enable_firm_exclusion:
+            # Store pre-exclusion count for statistics
+            self.pre_exclusion_count = len(deduplicated_df)
+            deduplicated_df = self.apply_firm_exclusion(deduplicated_df)
+            logger.info(f"After firm exclusion: {len(deduplicated_df)} contacts")
+        else:
+            self.pre_exclusion_count = len(deduplicated_df)
         
         # 4. Apply tier filtering
         tier1_config = self.create_tier1_config()
@@ -948,9 +1102,33 @@ def main():
         if not user_prefix:
             user_prefix = "Combined-Contacts"
     
+    # Check for firm exclusion option
+    exclusion_file = filter_tool.input_folder / "firm exclusion.csv"
+    enable_firm_exclusion = False
+    
+    if exclusion_file.exists():
+        print(f"\n📋 Found firm exclusion list: {exclusion_file.name}")
+        print("This file contains firms that can be excluded from processing.")
+        
+        while True:
+            response = input("Do you want to apply firm exclusion? (yes/no): ").strip().lower()
+            if response in ['yes', 'y']:
+                enable_firm_exclusion = True
+                print("✅ Firm exclusion will be applied")
+                break
+            elif response in ['no', 'n']:
+                enable_firm_exclusion = False
+                print("❌ Firm exclusion will NOT be applied")
+                break
+            else:
+                print("Please enter 'yes' or 'no'")
+    else:
+        print(f"\n📋 No firm exclusion file found at: {exclusion_file}")
+        print("All firms will be processed normally.")
+    
     try:
         # Process contacts
-        output_file = filter_tool.process_contacts(user_prefix)
+        output_file = filter_tool.process_contacts(user_prefix, enable_firm_exclusion)
         
         print()
         print("=" * 60)

@@ -32,11 +32,96 @@ class ConsolidatedTieredFilter:
         # Store extracted email patterns by firm
         self.firm_email_patterns = {}
         
+        # Firm exclusion settings
+        self.enable_firm_exclusion = False
+        self.excluded_firms = set()
+        
+    def load_firm_exclusion_list(self) -> None:
+        """Load firm exclusion list from CSV file"""
+        exclusion_file = self.input_folder / "firm exclusion.csv"
+        
+        if not exclusion_file.exists():
+            logger.warning(f"Firm exclusion file not found: {exclusion_file}")
+            return
+        
+        try:
+            # Read CSV file - it's a simple single column list
+            with open(exclusion_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            # Clean and normalize firm names
+            excluded_firms = set()
+            for line in lines:
+                firm_name = line.strip()
+                if firm_name:  # Skip empty lines
+                    # Normalize for matching (lowercase, remove extra whitespace)
+                    normalized_name = firm_name.lower().strip()
+                    excluded_firms.add(normalized_name)
+                    # Also store original case for logging
+                    self.excluded_firms.add(firm_name.strip())
+            
+            # Store normalized versions for matching
+            self.excluded_firms_normalized = excluded_firms
+            
+            logger.info(f"Loaded {len(self.excluded_firms)} firms from exclusion list")
+            logger.info(f"Sample excluded firms: {list(self.excluded_firms)[:5]}...")
+            
+        except Exception as e:
+            logger.error(f"Error loading firm exclusion list: {e}")
+            self.excluded_firms = set()
+            self.excluded_firms_normalized = set()
+    
+    def apply_firm_exclusion(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply firm exclusion filtering"""
+        if not self.enable_firm_exclusion or not hasattr(self, 'excluded_firms_normalized'):
+            return df
+        
+        if len(df) == 0:
+            return df
+        
+        logger.info(f"Applying firm exclusion to {len(df)} contacts")
+        
+        # Create mask for non-excluded firms
+        if 'INVESTOR' not in df.columns:
+            logger.warning("No INVESTOR column found for firm exclusion")
+            return df
+        
+        def is_firm_excluded(firm_name):
+            if pd.isna(firm_name) or firm_name == '':
+                return False
+            
+            normalized_firm = str(firm_name).lower().strip()
+            return normalized_firm in self.excluded_firms_normalized
+        
+        # Apply exclusion filter
+        mask = ~df['INVESTOR'].apply(is_firm_excluded)
+        filtered_df = df[mask].copy()
+        
+        excluded_count = len(df) - len(filtered_df)
+        logger.info(f"Excluded {excluded_count} contacts from {len(self.excluded_firms)} excluded firms")
+        
+        if excluded_count > 0:
+            # Log some examples of excluded firms found in data
+            excluded_firms_found = set()
+            for _, row in df[~mask].iterrows():
+                firm = str(row.get('INVESTOR', '')).strip()
+                if firm:
+                    excluded_firms_found.add(firm)
+            
+            logger.info(f"Excluded firms found in data: {list(excluded_firms_found)[:5]}...")
+        
+        return filtered_df
+        
     def load_and_combine_input_files(self) -> pd.DataFrame:
-        """Load all Excel files from input folder and combine them"""
+        """Load all Excel files from input folder and combine them (excluding CSV files)"""
         logger.info(f"Loading files from {self.input_folder}")
         
         excel_files = list(self.input_folder.glob("*.xlsx"))
+        # Exclude any CSV files from processing (like firm exclusion.csv)
+        csv_files = list(self.input_folder.glob("*.csv"))
+        if csv_files:
+            logger.info(f"Found {len(csv_files)} CSV files in input folder - these will be ignored for contact processing: {[f.name for f in csv_files]}")
+        
         if not excel_files:
             raise FileNotFoundError(f"No Excel files found in {self.input_folder}")
         
@@ -730,9 +815,16 @@ class ConsolidatedTieredFilter:
         
         return analysis
     
-    def process_contacts(self, user_prefix: str = None) -> str:
+    def process_contacts(self, user_prefix: str = None, enable_firm_exclusion: bool = False) -> str:
         """Main processing function"""
         logger.info("Starting consolidated tiered filtering process")
+        
+        # Set firm exclusion setting
+        self.enable_firm_exclusion = enable_firm_exclusion
+        
+        # Load firm exclusion list if enabled
+        if self.enable_firm_exclusion:
+            self.load_firm_exclusion_list()
         
         # Load and combine input files
         combined_df, file_info = self.load_and_combine_input_files()
@@ -749,6 +841,11 @@ class ConsolidatedTieredFilter:
         # Clean data after standardization (no longer needed before deduplication)
         combined_df = self.clean_data_after_standardization(combined_df)
         logger.info(f"After clean_data: {len(combined_df)} contacts")
+        
+        # Apply firm exclusion if enabled
+        if self.enable_firm_exclusion:
+            combined_df = self.apply_firm_exclusion(combined_df)
+            logger.info(f"After firm_exclusion: {len(combined_df)} contacts")
         
         # Extract email patterns from full dataset
         firm_email_patterns = self.extract_email_patterns_by_firm(combined_df)
@@ -1084,11 +1181,35 @@ def main():
         if not user_prefix:
             user_prefix = "Combined-Contacts"
     
+    # Check for firm exclusion option
+    exclusion_file = input_folder / "firm exclusion.csv"
+    enable_firm_exclusion = False
+    
+    if exclusion_file.exists():
+        print(f"\n📋 Found firm exclusion list: {exclusion_file.name}")
+        print("This file contains firms that can be excluded from processing.")
+        
+        while True:
+            response = input("Do you want to apply firm exclusion? (yes/no): ").strip().lower()
+            if response in ['yes', 'y']:
+                enable_firm_exclusion = True
+                print("✅ Firm exclusion will be applied")
+                break
+            elif response in ['no', 'n']:
+                enable_firm_exclusion = False
+                print("❌ Firm exclusion will NOT be applied")
+                break
+            else:
+                print("Please enter 'yes' or 'no'")
+    else:
+        print(f"\n📋 No firm exclusion file found at: {exclusion_file}")
+        print("All firms will be processed normally.")
+    
     # Initialize and run filter
     filter_tool = ConsolidatedTieredFilter()
     
     try:
-        output_file = filter_tool.process_contacts(user_prefix)
+        output_file = filter_tool.process_contacts(user_prefix, enable_firm_exclusion)
         
         print("\n" + "=" * 60)
         print("✅ SUCCESS! Consolidated filtering completed.")
