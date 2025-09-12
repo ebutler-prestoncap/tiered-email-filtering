@@ -2,19 +2,26 @@
 
 ## 🚀 Overview
 
-A professional contact filtering tool that processes Excel contact lists and organizes them into a two-tier structure optimized for investment outreach. The system intelligently removes duplicates, applies firm exclusions, and provides detailed analytics.
+A professional contact filtering tool that processes Excel contact lists and organizes them into a two-tier structure optimized for investment outreach. The system intelligently removes duplicates, applies firm exclusions, forces contact inclusions, and provides detailed analytics.
 
 ## ✨ Key Features
 
+### Core Filtering
 - ✅ **Two-Tier System**: Separates key contacts (Tier 1) from junior contacts (Tier 2)
 - ✅ **Smart Deduplication**: Removes duplicates based on name + firm combination
+- ✅ **Firm Limits**: Max 10 Tier 1 + 6 Tier 2 contacts per firm
+- ✅ **Multiple Input Support**: Combines multiple Excel files automatically
+
+### Advanced Control
 - ✅ **Optional Firm Exclusion**: Exclude specific firms using `firm exclusion.csv`
 - ✅ **Optional Contact Inclusion**: Force specific individuals through filters using `include_contacts.csv`
 - ✅ **Email Pattern Extraction**: Analyzes datasets to extract firm email patterns
 - ✅ **Missing Email Filling**: Uses patterns to fill missing emails
-- ✅ **Firm Limits**: Max 10 Tier 1 + 6 Tier 2 contacts per firm
-- ✅ **Multiple Input Support**: Combines multiple Excel files automatically
+
+### Professional Output
 - ✅ **Comprehensive Analytics**: Detailed statistics and processing metrics
+- ✅ **Excel Output**: Multi-sheet workbooks with summaries and analysis
+- ✅ **Audit Trail**: Complete delta analysis showing filtering decisions
 
 ## 🗂️ Project Structure
 
