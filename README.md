@@ -9,6 +9,7 @@ A professional contact filtering tool that processes Excel contact lists and org
 - ✅ **Two-Tier System**: Separates key contacts (Tier 1) from junior contacts (Tier 2)
 - ✅ **Smart Deduplication**: Removes duplicates based on name + firm combination
 - ✅ **Optional Firm Exclusion**: Exclude specific firms using `firm exclusion.csv`
+- ✅ **Optional Contact Inclusion**: Force specific individuals through filters using `include_contacts.csv`
 - ✅ **Email Pattern Extraction**: Analyzes datasets to extract firm email patterns
 - ✅ **Missing Email Filling**: Uses patterns to fill missing emails
 - ✅ **Firm Limits**: Max 10 Tier 1 + 6 Tier 2 contacts per firm
@@ -22,7 +23,8 @@ tiered-email-filtering/
 ├── tiered_filter.py              # Main filtering tool
 ├── requirements.txt              # Python dependencies
 ├── input/                       # Place Excel files here
-│   └── firm exclusion.csv       # Optional: firms to exclude
+│   ├── firm exclusion.csv       # Optional: firms to exclude
+│   └── include_contacts.csv     # Optional: contacts to force through filters
 ├── output/                      # Results saved here
 ├── tests/                       # Test files and demos
 │   └── demo_firm_exclusion.py   # Demo script
@@ -71,14 +73,36 @@ tiered-email-filtering/
 - **Complete firm exclusion**: All contacts from excluded firms are removed
 - **Detailed reporting**: Shows which excluded firms were found and removed
 
+## ✅ Contact Inclusion Feature
+
+### Setup
+1. Place a file named `include_contacts.csv` in the `/input` folder
+2. Use format: `Institution_Name,Full_Name` (with header row)
+3. List specific individuals to force through filters
+4. Run the filtering tool and choose "yes" when prompted
+
+### How It Works
+- **Individual targeting**: Targets specific people, not entire firms
+- **Bypass all filters**: Forces contacts through regardless of job title/team requirements
+- **Smart tier placement**: Places contacts in appropriate tier based on job title patterns
+- **Applied after standard filtering**: Adds missing contacts to existing results
+- **Comprehensive tracking**: Shows how many contacts were forced through filters
+
+### Example Format
+```csv
+Institution_Name,Full_Name
+Goldman Sachs,John Smith
+BlackRock,Jane Doe
+```
+
 ## 📈 Data Processing Pipeline
 
 ```
 Input Files → Combine → Standardize Columns → Remove Duplicates → [Optional: Firm Exclusion]
      ↓
-Extract Email Patterns → Apply Tier 1 Filter → Apply Tier 2 Filter → Fill Missing Emails
+Extract Email Patterns → Apply Tier 1 Filter → Apply Tier 2 Filter → [Optional: Contact Inclusion]
      ↓
-Generate Output with Comprehensive Analytics
+Fill Missing Emails → Generate Output with Comprehensive Analytics
 ```
 
 ## 📊 Output Structure
@@ -88,6 +112,7 @@ Generate Output with Comprehensive Analytics
 2. **Tier2_Junior_Contacts**: Junior professionals with investment team focus
 3. **Processing_Summary**: Comprehensive statistics and metrics including:
    - Firm exclusion impact (firms/contacts removed)
+   - Contact inclusion impact (contacts forced through filters)
    - Average and median contacts per firm (before filtering and per tier)
    - Processing pipeline metrics
    - Email availability statistics
@@ -97,14 +122,16 @@ Generate Output with Comprehensive Analytics
 
 ## 🧪 Testing
 
-Run the demo to see firm exclusion in action:
+Run the demo to see all advanced features in action:
 ```bash
 python3 tests/demo_firm_exclusion.py
 ```
 
-This will generate two output files:
-- **With exclusion**: Fewer contacts, excluded firms removed
-- **Without exclusion**: All contacts, for comparison
+This will generate four output files showing different configurations:
+- **With-Exclusion**: Firms removed, standard filtering
+- **With-Inclusion**: Standard filtering + forced contacts  
+- **With-Both**: Firms removed + forced contacts
+- **Standard**: Baseline with no special processing
 
 ## 📋 Example Usage
 
@@ -147,7 +174,8 @@ from tiered_filter import TieredFilter
 filter_tool = TieredFilter()
 output_file = filter_tool.process_contacts(
     user_prefix="My-Contacts",
-    enable_firm_exclusion=True
+    enable_firm_exclusion=True,
+    enable_contact_inclusion=True
 )
 ```
 
@@ -167,6 +195,7 @@ The system provides comprehensive analytics including:
 - **Firm Statistics**: Unique firms, average/median contacts per firm
 - **Tier Analysis**: Contacts and firms per tier with distribution metrics
 - **Exclusion Impact**: Detailed breakdown of firm exclusion effects
+- **Inclusion Impact**: Tracking of contacts forced through filters
 - **Email Intelligence**: Pattern extraction and missing email filling statistics
 
 ## 🗄️ Legacy Files

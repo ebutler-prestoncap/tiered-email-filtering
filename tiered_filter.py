@@ -52,6 +52,11 @@ class TieredFilter:
         self.enable_firm_exclusion = False
         self.excluded_firms = set()
         
+        # Contact inclusion settings
+        self.enable_contact_inclusion = False
+        self.included_contacts = set()  # Set of (name, firm) tuples
+        self.contacts_forced_included = 0  # Count of contacts forced through filters
+        
     def load_firm_exclusion_list(self) -> None:
         """Load firm exclusion list from CSV file"""
         exclusion_file = self.input_folder / "firm exclusion.csv"
@@ -127,6 +132,127 @@ class TieredFilter:
             logger.info(f"Excluded firms found in data: {list(excluded_firms_found)[:5]}...")
         
         return filtered_df
+    
+    def load_contact_inclusion_list(self) -> None:
+        """Load contact inclusion list from CSV file"""
+        inclusion_file = self.input_folder / "include_contacts.csv"
+        
+        if not inclusion_file.exists():
+            logger.warning(f"Contact inclusion file not found: {inclusion_file}")
+            return
+        
+        try:
+            # Read CSV file with Institution_Name and Full_Name columns
+            import pandas as pd
+            df = pd.read_csv(inclusion_file)
+            
+            # Ensure required columns exist
+            if 'Institution_Name' not in df.columns or 'Full_Name' not in df.columns:
+                logger.error("Contact inclusion CSV must have 'Institution_Name' and 'Full_Name' columns")
+                return
+            
+            # Clean and normalize contact combinations
+            included_contacts = set()
+            for _, row in df.iterrows():
+                firm_name = str(row.get('Institution_Name', '')).strip()
+                full_name = str(row.get('Full_Name', '')).strip()
+                
+                if firm_name and full_name:  # Skip empty rows
+                    # Normalize for matching (lowercase, remove extra whitespace)
+                    normalized_firm = firm_name.lower().strip()
+                    normalized_name = full_name.lower().strip()
+                    included_contacts.add((normalized_name, normalized_firm))
+                    # Also store original case for logging
+                    self.included_contacts.add((full_name.strip(), firm_name.strip()))
+            
+            # Store normalized versions for matching
+            self.included_contacts_normalized = included_contacts
+            
+            logger.info(f"Loaded {len(self.included_contacts)} contacts from inclusion list")
+            logger.info(f"Sample included contacts: {list(self.included_contacts)[:5]}...")
+            
+        except Exception as e:
+            logger.error(f"Error loading contact inclusion list: {e}")
+            self.included_contacts = set()
+            self.included_contacts_normalized = set()
+    
+    def apply_contact_inclusion(self, tier1_df: pd.DataFrame, tier2_df: pd.DataFrame, 
+                               source_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Apply contact inclusion to ensure specific contacts are included"""
+        if not self.enable_contact_inclusion or not hasattr(self, 'included_contacts_normalized'):
+            return tier1_df, tier2_df
+        
+        logger.info(f"Applying contact inclusion for {len(self.included_contacts)} specified contacts")
+        
+        # Find contacts that should be included but aren't in current tiers
+        missing_contacts = []
+        
+        # Create lookup sets for current tier contacts
+        tier1_lookup = set()
+        tier2_lookup = set()
+        
+        for _, row in tier1_df.iterrows():
+            name = str(row.get('NAME', '')).lower().strip()
+            firm = str(row.get('INVESTOR', '')).lower().strip()
+            tier1_lookup.add((name, firm))
+        
+        for _, row in tier2_df.iterrows():
+            name = str(row.get('NAME', '')).lower().strip()
+            firm = str(row.get('INVESTOR', '')).lower().strip()
+            tier2_lookup.add((name, firm))
+        
+        # Check which included contacts are missing from both tiers
+        for (name, firm) in self.included_contacts_normalized:
+            if (name, firm) not in tier1_lookup and (name, firm) not in tier2_lookup:
+                # Find this contact in the source data
+                source_match = None
+                for _, source_row in source_df.iterrows():
+                    source_name = str(source_row.get('NAME', '')).lower().strip()
+                    source_firm = str(source_row.get('INVESTOR', '')).lower().strip()
+                    
+                    if source_name == name and source_firm == firm:
+                        source_match = source_row
+                        break
+                
+                if source_match is not None:
+                    missing_contacts.append(source_match)
+                    logger.info(f"Found missing included contact: {source_match.get('NAME')} at {source_match.get('INVESTOR')}")
+                else:
+                    logger.warning(f"Included contact not found in source data: {name} at {firm}")
+        
+        # Add missing contacts to appropriate tier based on job title patterns
+        added_to_tier1 = 0
+        added_to_tier2 = 0
+        
+        if missing_contacts:
+            tier1_config = self.create_tier1_config()
+            tier2_config = self.create_tier2_config()
+            
+            # Convert missing contacts to DataFrame for easier processing
+            missing_df = pd.DataFrame(missing_contacts)
+            
+            for _, contact in missing_df.iterrows():
+                job_title = str(contact.get('JOB_TITLE', '')).lower()
+                
+                # Check if contact matches Tier 1 patterns (prioritize Tier 1)
+                tier1_regex = re.compile(tier1_config['job_title_pattern'], re.IGNORECASE)
+                tier1_exclusion = re.compile(tier1_config['exclusion_pattern'], re.IGNORECASE)
+                
+                if (tier1_regex.search(job_title) and not tier1_exclusion.search(job_title)):
+                    # Add to Tier 1
+                    tier1_df = pd.concat([tier1_df, contact.to_frame().T], ignore_index=True)
+                    added_to_tier1 += 1
+                else:
+                    # Add to Tier 2 (forced inclusion regardless of investment team requirement)
+                    tier2_df = pd.concat([tier2_df, contact.to_frame().T], ignore_index=True)
+                    added_to_tier2 += 1
+        
+        logger.info(f"Contact inclusion: Added {added_to_tier1} to Tier 1, {added_to_tier2} to Tier 2")
+        
+        # Store count for summary statistics
+        self.contacts_forced_included = added_to_tier1 + added_to_tier2
+        
+        return tier1_df, tier2_df
         
     def clean_and_archive_output(self) -> None:
         """Clean output folder and archive previous runs with organized structure"""
@@ -382,7 +508,7 @@ class TieredFilter:
         logger.info(f"Loading files from {self.input_folder}")
         
         excel_files = list(self.input_folder.glob("*.xlsx"))
-        # Exclude any CSV files from processing (like firm exclusion.csv)
+        # Exclude any CSV files from processing (like firm exclusion.csv, include_contacts.csv)
         csv_files = list(self.input_folder.glob("*.csv"))
         if csv_files:
             logger.info(f"Found {len(csv_files)} CSV files in input folder - these will be ignored for contact processing: {[f.name for f in csv_files]}")
@@ -835,6 +961,15 @@ class TieredFilter:
                 if hasattr(self, 'pre_exclusion_count'):
                     contacts_excluded_count = self.pre_exclusion_count - len(deduplicated_df) if deduplicated_df is not None else 0
             
+            # Calculate contact inclusion statistics
+            contacts_included_count = 0
+            contacts_forced_included = 0
+            if self.enable_contact_inclusion and hasattr(self, 'included_contacts'):
+                contacts_included_count = len(self.included_contacts)
+                # This would need to be tracked during inclusion process
+                # For now, we'll calculate based on whether contacts were found
+                contacts_forced_included = getattr(self, 'contacts_forced_included', 0)
+            
             summary_data = {
                 'Step': [
                     '📁 Input Files',
@@ -847,6 +982,10 @@ class TieredFilter:
                     '🚫 Firm Exclusion Applied',
                     '🚫 Firms Excluded',
                     '🚫 Contacts Excluded by Firm Filter',
+                    '',
+                    '✅ Contact Inclusion Applied',
+                    '✅ Contacts in Inclusion List',
+                    '✅ Contacts Forced Through Filters',
                     '',
                     '🎯 Tier 1 (Key Contacts)',
                     '🏢 Tier 1 Firms/Institutions',
@@ -876,6 +1015,10 @@ class TieredFilter:
                     "Yes" if self.enable_firm_exclusion else "No",
                     f"{firms_excluded_count:,}" if self.enable_firm_exclusion else "0",
                     f"{contacts_excluded_count:,}" if self.enable_firm_exclusion else "0",
+                    '',
+                    "Yes" if self.enable_contact_inclusion else "No",
+                    f"{contacts_included_count:,}" if self.enable_contact_inclusion else "0",
+                    f"{contacts_forced_included:,}" if self.enable_contact_inclusion else "0",
                     '',
                     len(tier1_df),
                     f"{tier1_firms:,}",
@@ -1017,16 +1160,23 @@ class TieredFilter:
         
         return analysis
     
-    def process_contacts(self, user_prefix: str = None, enable_firm_exclusion: bool = False) -> str:
+    def process_contacts(self, user_prefix: str = None, enable_firm_exclusion: bool = False, enable_contact_inclusion: bool = False) -> str:
         """Main processing function"""
         logger.info("Starting tiered filtering process")
         
         # Set firm exclusion setting
         self.enable_firm_exclusion = enable_firm_exclusion
         
+        # Set contact inclusion setting  
+        self.enable_contact_inclusion = enable_contact_inclusion
+        
         # Load firm exclusion list if enabled
         if self.enable_firm_exclusion:
             self.load_firm_exclusion_list()
+        
+        # Load contact inclusion list if enabled
+        if self.enable_contact_inclusion:
+            self.load_contact_inclusion_list()
         
         # 0. Clean output folder and archive previous runs
         self.clean_and_archive_output()
@@ -1056,6 +1206,10 @@ class TieredFilter:
         
         tier1_df = self.apply_tier_filter(deduplicated_df, tier1_config, self.tier1_limit)
         tier2_df = self.apply_tier_filter(deduplicated_df, tier2_config, self.tier2_limit)
+        
+        # Apply contact inclusion to ensure specified contacts are included
+        if self.enable_contact_inclusion:
+            tier1_df, tier2_df = self.apply_contact_inclusion(tier1_df, tier2_df, deduplicated_df)
         
         # 5. Create delta analysis
         delta_df = self.create_delta_analysis(combined_df, standardized_df, deduplicated_df, tier1_df, tier2_df, tier1_config, tier2_config)
@@ -1126,9 +1280,33 @@ def main():
         print(f"\n📋 No firm exclusion file found at: {exclusion_file}")
         print("All firms will be processed normally.")
     
+    # Check for contact inclusion option
+    inclusion_file = filter_tool.input_folder / "include_contacts.csv"
+    enable_contact_inclusion = False
+    
+    if inclusion_file.exists():
+        print(f"\n📋 Found contact inclusion list: {inclusion_file.name}")
+        print("This file contains specific contacts that will be forced through the filters.")
+        
+        while True:
+            response = input("Do you want to apply contact inclusion? (yes/no): ").strip().lower()
+            if response in ['yes', 'y']:
+                enable_contact_inclusion = True
+                print("✅ Contact inclusion will be applied")
+                break
+            elif response in ['no', 'n']:
+                enable_contact_inclusion = False
+                print("❌ Contact inclusion will NOT be applied")
+                break
+            else:
+                print("Please enter 'yes' or 'no'")
+    else:
+        print(f"\n📋 No contact inclusion file found at: {inclusion_file}")
+        print("Standard filtering will be applied to all contacts.")
+    
     try:
         # Process contacts
-        output_file = filter_tool.process_contacts(user_prefix, enable_firm_exclusion)
+        output_file = filter_tool.process_contacts(user_prefix, enable_firm_exclusion, enable_contact_inclusion)
         
         print()
         print("=" * 60)
