@@ -683,10 +683,10 @@ class TieredFilter:
         return {
             'name': 'Tier 1 - Key Contacts',
             'description': 'Senior decision makers and key investment professionals',
-            'job_title_pattern': r'.*\b(cio|c\.i\.o\.|chief\s+investment\s+officer|deputy\s+cio|head\s+of\s+investments?|head\s+of\s+research|head\s+of\s+private\s+markets?|managing\s+director|executive\s+director|senior\s+portfolio\s+manager|investment\s+director|portfolio\s+manager|investment\s+manager|fund\s+manager|president|vice\s+president|senior\s+vice\s+president|executive\s+vice\s+president)\b',
+            'job_title_pattern': r'.*\b(cio|c\.i\.o\.|chief\s+investment\s+officers?t?|deputy\s+cio|head\s+of\s+investments?|head\s+of\s+research|head\s+of\s+private\s+markets?|managing\s+directors?|managing\s+partners?|executive\s+directors?|senior\s+portfolio\s+managers?|investment\s+directors?|portfolio\s+managers?|investment\s+managers?|fund\s+managers?|presidents?|vice\s+presidents?|senior\s+vice\s+presidents?|executive\s+vice\s+presidents?)\b',
             'exclusion_pattern': r'.*\b(operations?|hr|human\s+resources?|investor\s+relations?|client\s+relations?|marketing|sales|compliance|technology|administrator|assistant|secretary|receptionist|intern|trainee)\b',
             'require_investment_team': False,
-            'priority_keywords': ['cio', 'chief investment officer', 'managing director', 'portfolio manager', 'president']
+            'priority_keywords': ['cio', 'chief investment officer', 'managing director', 'managing partner', 'portfolio manager', 'fund manager', 'president']
         }
     
     def create_tier2_config(self) -> Dict[str, Any]:
@@ -710,9 +710,9 @@ class TieredFilter:
             if keyword.lower() in job_title:
                 if keyword.lower() in ['cio', 'chief investment officer']:
                     priority_score += 100
-                elif keyword.lower() in ['managing director', 'president']:
+                elif keyword.lower() in ['managing director', 'managing partner', 'president']:
                     priority_score += 80
-                elif keyword.lower() in ['portfolio manager']:
+                elif keyword.lower() in ['portfolio manager', 'fund manager']:
                     priority_score += 60
                 else:
                     priority_score += 40
@@ -978,15 +978,15 @@ class TieredFilter:
                     '🏢 Unique Firms/Institutions After Deduplication',
                     '📊 Avg Contacts per Firm (Before Filtering)',
                     '📊 Median Contacts per Firm (Before Filtering)',
-                    '',
+                    '—',
                     '🚫 Firm Exclusion Applied',
                     '🚫 Firms Excluded',
                     '🚫 Contacts Excluded by Firm Filter',
-                    '',
+                    '—',
                     '✅ Contact Inclusion Applied',
                     '✅ Contacts in Inclusion List',
                     '✅ Contacts Forced Through Filters',
-                    '',
+                    '—',
                     '🎯 Tier 1 (Key Contacts)',
                     '🏢 Tier 1 Firms/Institutions',
                     '📊 Avg Contacts per Firm (Tier 1)',
@@ -998,10 +998,10 @@ class TieredFilter:
                     '📈 Total Filtered Contacts',
                     '🏢 Total Firms/Institutions (Both Tiers)',
                     '📊 Retention Rate',
-                    '',
+                    '—',
                     '📧 Tier 1 Emails Available',
                     '📧 Tier 2 Emails Available',
-                    '',
+                    '—',
                     '📅 Processing Date'
                 ],
                 'Count': [
@@ -1011,30 +1011,30 @@ class TieredFilter:
                     f"{unique_firms_after_dedup:,}",
                     f"{avg_contacts_per_firm_before:.1f}",
                     f"{median_contacts_per_firm_before:.1f}",
-                    '',
+                    '—',
                     "Yes" if self.enable_firm_exclusion else "No",
                     f"{firms_excluded_count:,}" if self.enable_firm_exclusion else "0",
                     f"{contacts_excluded_count:,}" if self.enable_firm_exclusion else "0",
-                    '',
+                    '—',
                     "Yes" if self.enable_contact_inclusion else "No",
                     f"{contacts_included_count:,}" if self.enable_contact_inclusion else "0",
                     f"{contacts_forced_included:,}" if self.enable_contact_inclusion else "0",
-                    '',
-                    len(tier1_df),
+                    '—',
+                    f"{len(tier1_df):,}",
                     f"{tier1_firms:,}",
                     f"{avg_contacts_per_firm_tier1:.1f}",
                     f"{median_contacts_per_firm_tier1:.1f}",
-                    len(tier2_df),
+                    f"{len(tier2_df):,}",
                     f"{tier2_firms:,}",
                     f"{avg_contacts_per_firm_tier2:.1f}",
                     f"{median_contacts_per_firm_tier2:.1f}",
-                    len(tier1_df) + len(tier2_df),
+                    f"{len(tier1_df) + len(tier2_df):,}",
                     f"{total_firms_filtered:,}",
                     f"{((len(tier1_df) + len(tier2_df)) / total_raw * 100):.1f}%" if total_raw > 0 else "0.0%",
-                    '',
-                    tier1_df['EMAIL'].notna().sum() if len(tier1_df) > 0 else 0,
-                    tier2_df['EMAIL'].notna().sum() if len(tier2_df) > 0 else 0,
-                    '',
+                    '—',
+                    f"{tier1_df['EMAIL'].notna().sum():,}" if len(tier1_df) > 0 else "0",
+                    f"{tier2_df['EMAIL'].notna().sum():,}" if len(tier2_df) > 0 else "0",
+                    '—',
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 ]
             }
