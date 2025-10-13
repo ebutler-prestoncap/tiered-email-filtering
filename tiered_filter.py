@@ -16,6 +16,7 @@ import pandas as pd
 import numpy as np
 import re
 import sys
+import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Any
 from datetime import datetime
@@ -869,7 +870,8 @@ class TieredFilter:
     def create_output_file(self, tier1_df: pd.DataFrame, tier2_df: pd.DataFrame, 
                           file_info: List[Dict], dedup_count: int, 
                           output_filename: str, deduplicated_df: pd.DataFrame = None, 
-                          delta_df: pd.DataFrame = None, excluded_firms_analysis: Dict = None) -> str:
+                          delta_df: pd.DataFrame = None, excluded_firms_analysis: Dict = None,
+                          rescued_df: pd.DataFrame = None, rescue_stats: Dict = None) -> str:
         """Create comprehensive output Excel file"""
         
         output_path = self.output_folder / output_filename
@@ -901,6 +903,15 @@ class TieredFilter:
             else:
                 tier2_reordered = tier2_df
             tier2_reordered.to_excel(writer, sheet_name='Tier2_Junior_Contacts', index=False)
+            
+            # Rescued contacts (if any)
+            if rescued_df is not None and len(rescued_df) > 0:
+                # Reorder rescued contacts with standard columns first
+                if 'First Name' in rescued_df.columns and 'Last Name' in rescued_df.columns:
+                    rescued_reordered = rescued_df[['First Name', 'Last Name'] + [col for col in rescued_df.columns if col not in ['First Name', 'Last Name']]]
+                else:
+                    rescued_reordered = rescued_df
+                rescued_reordered.to_excel(writer, sheet_name='Tier3_Rescued_Contacts', index=False)
             
             # Processing summary
             total_raw = sum(info['contacts'] for info in file_info)
@@ -1002,6 +1013,11 @@ class TieredFilter:
                     '📧 Tier 1 Emails Available',
                     '📧 Tier 2 Emails Available',
                     '—',
+                    '🚁 Firm Rescue Applied',
+                    '🚁 Firms Rescued',
+                    '🚁 Contacts Rescued',
+                    '🚁 Firm Rescue Rate',
+                    '—',
                     '📅 Processing Date'
                 ],
                 'Count': [
@@ -1034,6 +1050,11 @@ class TieredFilter:
                     '—',
                     f"{tier1_df['EMAIL'].notna().sum():,}" if len(tier1_df) > 0 else "0",
                     f"{tier2_df['EMAIL'].notna().sum():,}" if len(tier2_df) > 0 else "0",
+                    '—',
+                    "Yes" if (rescue_stats and rescue_stats.get('rescued_contacts', 0) > 0) else "No",
+                    f"{rescue_stats.get('rescued_firms', 0):,}" if rescue_stats else "0",
+                    f"{rescue_stats.get('rescued_contacts', 0):,}" if rescue_stats else "0",
+                    f"{rescue_stats.get('rescue_rate', 0):.1f}%" if rescue_stats else "0.0%",
                     '—',
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 ]
@@ -1117,7 +1138,7 @@ class TieredFilter:
         logger.info(f"Output saved to: {output_path}")
         return str(output_path)
     
-    def create_excluded_firms_analysis(self, deduplicated_df: pd.DataFrame, tier1_df: pd.DataFrame, tier2_df: pd.DataFrame) -> Dict:
+    def create_excluded_firms_analysis(self, deduplicated_df: pd.DataFrame, tier1_df: pd.DataFrame, tier2_df: pd.DataFrame, rescued_df: pd.DataFrame = None) -> Dict:
         """Create analysis of completely excluded firms vs included firms"""
         logger.info("Creating excluded firms analysis")
         
@@ -1126,12 +1147,14 @@ class TieredFilter:
         if 'INVESTOR' in deduplicated_df.columns and len(deduplicated_df) > 0:
             all_firms_after_dedup = set(deduplicated_df['INVESTOR'].dropna().unique())
         
-        # Get firms that made it into either tier
+        # Get firms that made it into either tier (including rescued firms)
         included_firms = set()
         if len(tier1_df) > 0 and 'INVESTOR' in tier1_df.columns:
             included_firms.update(tier1_df['INVESTOR'].dropna().unique())
         if len(tier2_df) > 0 and 'INVESTOR' in tier2_df.columns:
             included_firms.update(tier2_df['INVESTOR'].dropna().unique())
+        if rescued_df is not None and len(rescued_df) > 0 and 'INVESTOR' in rescued_df.columns:
+            included_firms.update(rescued_df['INVESTOR'].dropna().unique())
         
         # Find completely excluded firms (had contacts after dedup but none in final tiers)
         completely_excluded_firms = all_firms_after_dedup - included_firms
@@ -1160,7 +1183,106 @@ class TieredFilter:
         
         return analysis
     
-    def process_contacts(self, user_prefix: str = None, enable_firm_exclusion: bool = False, enable_contact_inclusion: bool = False) -> str:
+    def rescue_excluded_firms(self, deduplicated_df: pd.DataFrame, tier1_df: pd.DataFrame, tier2_df: pd.DataFrame, max_contacts_per_firm: int = 3) -> Tuple[pd.DataFrame, Dict]:
+        """
+        Rescue top 1-3 contacts from firms that have zero contacts in Tiers 1/2
+        
+        Args:
+            deduplicated_df: All deduplicated contacts
+            tier1_df: Current Tier 1 contacts
+            tier2_df: Current Tier 2 contacts  
+            max_contacts_per_firm: Maximum contacts to rescue per firm (default: 3)
+            
+        Returns:
+            Tuple of (rescued_contacts_df, rescue_stats)
+        """
+        logger.info("Starting firm rescue process for excluded firms")
+        
+        # Get firms that have contacts in Tiers 1/2
+        included_firms = set()
+        if len(tier1_df) > 0 and 'INVESTOR' in tier1_df.columns:
+            included_firms.update(tier1_df['INVESTOR'].dropna().unique())
+        if len(tier2_df) > 0 and 'INVESTOR' in tier2_df.columns:
+            included_firms.update(tier2_df['INVESTOR'].dropna().unique())
+        
+        # Find firms with zero contacts in tiers
+        all_firms = set(deduplicated_df['INVESTOR'].dropna().unique())
+        excluded_firms = all_firms - included_firms
+        
+        logger.info(f"Found {len(excluded_firms)} firms with zero contacts in Tiers 1/2")
+        
+        if len(excluded_firms) == 0:
+            return pd.DataFrame(), {'rescued_firms': 0, 'rescued_contacts': 0}
+        
+        rescued_contacts = []
+        rescued_firms_count = 0
+        
+        # Define priority scoring for rescue (similar to tier filtering but more inclusive)
+        def calculate_rescue_priority(row):
+            job_title = str(row.get('JOB_TITLE', '')).lower()
+            priority = 0
+            
+            # High priority titles (C-suite, senior roles)
+            if any(term in job_title for term in ['ceo', 'chief executive', 'managing director', 'managing partner']):
+                priority += 100
+            elif any(term in job_title for term in ['cfo', 'chief financial', 'cio', 'chief investment']):
+                priority += 90
+            elif any(term in job_title for term in ['coo', 'chief operating', 'president', 'chairman', 'chair']):
+                priority += 80
+            elif any(term in job_title for term in ['director', 'partner', 'vice president']):
+                priority += 60
+            elif any(term in job_title for term in ['manager', 'head of']):
+                priority += 40
+            elif any(term in job_title for term in ['analyst', 'associate']):
+                priority += 20
+            
+            # Bonus for investment-related terms
+            if 'investment' in job_title:
+                priority += 15
+            if 'portfolio' in job_title:
+                priority += 10
+            if 'fund' in job_title:
+                priority += 10
+                
+            return priority
+        
+        # Process each excluded firm
+        for firm in excluded_firms:
+            firm_contacts = deduplicated_df[deduplicated_df['INVESTOR'] == firm].copy()
+            
+            if len(firm_contacts) == 0:
+                continue
+                
+            # Calculate priority scores
+            firm_contacts['rescue_priority'] = firm_contacts.apply(calculate_rescue_priority, axis=1)
+            
+            # Sort by priority (descending) and take top contacts
+            firm_contacts = firm_contacts.sort_values('rescue_priority', ascending=False)
+            top_contacts = firm_contacts.head(max_contacts_per_firm)
+            
+            # Only rescue contacts with some priority (avoid completely irrelevant contacts)
+            top_contacts = top_contacts[top_contacts['rescue_priority'] > 0]
+            
+            if len(top_contacts) > 0:
+                rescued_contacts.extend(top_contacts.to_dict('records'))
+                rescued_firms_count += 1
+                
+                logger.info(f"Rescued {len(top_contacts)} contacts from {firm}")
+        
+        rescued_df = pd.DataFrame(rescued_contacts) if rescued_contacts else pd.DataFrame()
+        
+        rescue_stats = {
+            'total_excluded_firms': len(excluded_firms),
+            'rescued_firms': rescued_firms_count,
+            'rescued_contacts': len(rescued_df),
+            'rescue_rate': (rescued_firms_count / len(excluded_firms) * 100) if len(excluded_firms) > 0 else 0
+        }
+        
+        logger.info(f"Firm rescue complete: {rescue_stats['rescued_contacts']} contacts from {rescue_stats['rescued_firms']} firms")
+        
+        return rescued_df, rescue_stats
+    
+    def process_contacts(self, user_prefix: str = None, enable_firm_exclusion: bool = False, enable_contact_inclusion: bool = False, include_all_firms: bool = False) -> str:
         """Main processing function"""
         logger.info("Starting tiered filtering process")
         
@@ -1214,24 +1336,51 @@ class TieredFilter:
         # 5. Create delta analysis
         delta_df = self.create_delta_analysis(combined_df, standardized_df, deduplicated_df, tier1_df, tier2_df, tier1_config, tier2_config)
         
-        # 6. Create excluded firms analysis
-        excluded_firms_analysis = self.create_excluded_firms_analysis(deduplicated_df, tier1_df, tier2_df)
+        # 5.5. Rescue excluded firms (if enabled)
+        rescued_df = pd.DataFrame()
+        rescue_stats = {'rescued_firms': 0, 'rescued_contacts': 0, 'total_excluded_firms': 0, 'rescue_rate': 0}
+        
+        if include_all_firms:
+            logger.info("Applying firm rescue process")
+            rescued_df, rescue_stats = self.rescue_excluded_firms(deduplicated_df, tier1_df, tier2_df)
+            
+            if len(rescued_df) > 0:
+                # Add rescued contacts as a new tier (Tier 3 - Rescued Contacts)
+                rescued_df['tier_type'] = 'Tier 3 - Rescued Contacts'
+                logger.info(f"Added {len(rescued_df)} rescued contacts from {rescue_stats['rescued_firms']} firms")
+        
+        # 6. Create excluded firms analysis (after rescue)
+        excluded_firms_analysis = self.create_excluded_firms_analysis(deduplicated_df, tier1_df, tier2_df, rescued_df if include_all_firms else pd.DataFrame())
         
         # 7. Generate output file with delta analysis and excluded firms
         output_filename = self.generate_output_filename(file_info, user_prefix)
-        output_path = self.create_output_file(tier1_df, tier2_df, file_info, dedup_count, output_filename, deduplicated_df, delta_df, excluded_firms_analysis)
+        output_path = self.create_output_file(tier1_df, tier2_df, file_info, dedup_count, output_filename, deduplicated_df, delta_df, excluded_firms_analysis, rescued_df, rescue_stats)
         
         # Summary
         total_contacts = len(tier1_df) + len(tier2_df)
-        logger.info(f"Processing complete! Final result: {total_contacts} qualified contacts ({len(tier1_df)} Tier 1 + {len(tier2_df)} Tier 2)")
+        if include_all_firms and len(rescued_df) > 0:
+            total_contacts += len(rescued_df)
+            logger.info(f"Processing complete! Final result: {total_contacts} qualified contacts ({len(tier1_df)} Tier 1 + {len(tier2_df)} Tier 2 + {len(rescued_df)} Rescued)")
+        else:
+            logger.info(f"Processing complete! Final result: {total_contacts} qualified contacts ({len(tier1_df)} Tier 1 + {len(tier2_df)} Tier 2)")
         
         return output_path
 
 
 def main():
     """Main execution function"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Tiered Contact Filter')
+    parser.add_argument('--include-all-firms', action='store_true', 
+                       help='Include top 1-3 contacts from firms with zero contacts in Tiers 1/2')
+    args = parser.parse_args()
+    
     print("🚀 TIERED CONTACT FILTER")
     print("=" * 60)
+    
+    if args.include_all_firms:
+        print("🏢 --include-all-firms flag enabled: Will rescue top contacts from excluded firms")
+        print()
     
     # Initialize filter
     filter_tool = TieredFilter()
@@ -1306,7 +1455,7 @@ def main():
     
     try:
         # Process contacts
-        output_file = filter_tool.process_contacts(user_prefix, enable_firm_exclusion, enable_contact_inclusion)
+        output_file = filter_tool.process_contacts(user_prefix, enable_firm_exclusion, enable_contact_inclusion, args.include_all_firms)
         
         print()
         print("=" * 60)
@@ -1316,6 +1465,8 @@ def main():
         print("📋 Output includes:")
         print("   • Tier1_Key_Contacts: Senior decision makers")
         print("   • Tier2_Junior_Contacts: Junior professionals (investment team)")
+        if args.include_all_firms:
+            print("   • Tier3_Rescued_Contacts: Top contacts from excluded firms")
         print("   • Processing_Summary: Statistics and metrics")
         print("   • Input_File_Details: Source file information")
         print("   • Excluded_Firms_Summary: Analysis of completely excluded firms")
