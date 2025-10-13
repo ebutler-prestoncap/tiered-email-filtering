@@ -452,20 +452,30 @@ class TieredFilter:
                     'INVESTOR': row.get('STD_INVESTOR', '')
                 })
                 
-                # Check tier 1 patterns
-                tier1_score = self.calculate_priority(mock_row, tier1_config if tier1_config else self.create_tier1_config())
-                # Check tier 2 patterns  
-                tier2_score = self.calculate_priority(mock_row, tier2_config if tier2_config else self.create_tier2_config())
+                # Check tier patterns using actual regex (consistent with filtering logic)
+                tier1_cfg = tier1_config if tier1_config else self.create_tier1_config()
+                tier2_cfg = tier2_config if tier2_config else self.create_tier2_config()
                 
-                if tier1_score > 0:
+                # Compile regex patterns
+                tier1_regex = re.compile(tier1_cfg['job_title_pattern'], re.IGNORECASE)
+                tier1_exclusion = re.compile(tier1_cfg['exclusion_pattern'], re.IGNORECASE)
+                tier2_regex = re.compile(tier2_cfg['job_title_pattern'], re.IGNORECASE)
+                tier2_exclusion = re.compile(tier2_cfg['exclusion_pattern'], re.IGNORECASE)
+                
+                # Check tier 1 match
+                tier1_matches = tier1_regex.search(job_title) and not tier1_exclusion.search(job_title)
+                # Check tier 2 match  
+                tier2_matches = tier2_regex.search(job_title) and not tier2_exclusion.search(job_title)
+                
+                if tier1_matches:
                     delta_df.at[idx, 'TIER_MATCH'] = 'Tier 1'
-                    delta_df.at[idx, 'PRIORITY_SCORE'] = tier1_score
-                elif tier2_score > 0 and 'investment team' in role:
+                    delta_df.at[idx, 'PRIORITY_SCORE'] = self.calculate_priority(mock_row, tier1_cfg)
+                elif tier2_matches and 'investment team' in role:
                     delta_df.at[idx, 'TIER_MATCH'] = 'Tier 2'
-                    delta_df.at[idx, 'PRIORITY_SCORE'] = tier2_score
-                elif tier2_score > 0:
+                    delta_df.at[idx, 'PRIORITY_SCORE'] = self.calculate_priority(mock_row, tier2_cfg)
+                elif tier2_matches:
                     delta_df.at[idx, 'TIER_MATCH'] = 'Tier 2 (No Inv Team)'
-                    delta_df.at[idx, 'PRIORITY_SCORE'] = tier2_score
+                    delta_df.at[idx, 'PRIORITY_SCORE'] = self.calculate_priority(mock_row, tier2_cfg)
                 else:
                     delta_df.at[idx, 'TIER_MATCH'] = 'No Match'
                 
@@ -687,7 +697,7 @@ class TieredFilter:
             'job_title_pattern': r'.*\b(cio|c\.i\.o\.|chief\s+investment\s+officers?t?|deputy\s+cio|head\s+of\s+investments?|head\s+of\s+research|head\s+of\s+private\s+markets?|managing\s+directors?|managing\s+partners?|executive\s+directors?|senior\s+portfolio\s+managers?|investment\s+directors?|portfolio\s+managers?|investment\s+managers?|fund\s+managers?|presidents?|vice\s+presidents?|senior\s+vice\s+presidents?|executive\s+vice\s+presidents?)\b',
             'exclusion_pattern': r'.*\b(operations?|hr|human\s+resources?|investor\s+relations?|client\s+relations?|marketing|sales|compliance|technology|administrator|assistant|secretary|receptionist|intern|trainee)\b',
             'require_investment_team': False,
-            'priority_keywords': ['cio', 'chief investment officer', 'managing director', 'managing partner', 'portfolio manager', 'fund manager', 'president']
+            'priority_keywords': ['cio', 'chief investment officer', 'managing director', 'managing partner', 'portfolio manager', 'fund manager', 'president', 'head of investments', 'head of research', 'head of private markets']
         }
     
     def create_tier2_config(self) -> Dict[str, Any]:
@@ -713,7 +723,7 @@ class TieredFilter:
                     priority_score += 100
                 elif keyword.lower() in ['managing director', 'managing partner', 'president']:
                     priority_score += 80
-                elif keyword.lower() in ['portfolio manager', 'fund manager']:
+                elif keyword.lower() in ['portfolio manager', 'fund manager', 'head of investments', 'head of research', 'head of private markets']:
                     priority_score += 60
                 else:
                     priority_score += 40
