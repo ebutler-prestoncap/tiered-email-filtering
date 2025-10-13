@@ -1,45 +1,8 @@
 # Tiered Contact Filter
 
-## 🚀 Overview
+A professional contact filtering tool that processes Excel contact lists and organizes them into prioritized tiers for investment outreach.
 
-A professional contact filtering tool that processes Excel contact lists and organizes them into a two-tier structure optimized for investment outreach. The system intelligently removes duplicates, applies firm exclusions, forces contact inclusions, and provides detailed analytics.
-
-## ✨ Key Features
-
-### Core Filtering
-- ✅ **Two-Tier System**: Separates key contacts (Tier 1) from junior contacts (Tier 2)
-- ✅ **Smart Deduplication**: Removes duplicates based on name + firm combination
-- ✅ **Firm Limits**: Max 10 Tier 1 + 6 Tier 2 contacts per firm
-- ✅ **Multiple Input Support**: Combines multiple Excel files automatically
-
-### Advanced Control
-- ✅ **Optional Firm Exclusion**: Exclude specific firms using `firm exclusion.csv`
-- ✅ **Optional Contact Inclusion**: Force specific individuals through filters using `include_contacts.csv`
-- ✅ **Email Pattern Extraction**: Analyzes datasets to extract firm email patterns
-- ✅ **Missing Email Filling**: Uses patterns to fill missing emails
-
-### Professional Output
-- ✅ **Comprehensive Analytics**: Detailed statistics and processing metrics
-- ✅ **Excel Output**: Multi-sheet workbooks with summaries and analysis
-- ✅ **Audit Trail**: Complete delta analysis showing filtering decisions
-
-## 🗂️ Project Structure
-
-```
-tiered-email-filtering/
-├── tiered_filter.py              # Main filtering tool
-├── requirements.txt              # Python dependencies
-├── input/                       # Place Excel files here
-│   ├── firm exclusion.csv       # Optional: firms to exclude
-│   └── include_contacts.csv     # Optional: contacts to force through filters
-├── output/                      # Results saved here
-├── tests/                       # Test files and demos
-│   └── demo_firm_exclusion.py   # Demo script
-└── archive/                     # Legacy files and previous runs
-    └── legacy_filters/          # Old filtering implementations
-```
-
-## 🎯 Quick Start
+## 🚀 Quick Start
 
 1. **Install Requirements**:
    ```bash
@@ -50,131 +13,88 @@ tiered-email-filtering/
 
 3. **Run Filtering**:
    ```bash
+   # Standard filtering
    python3 tiered_filter.py
+   
+   # Include contacts from excluded firms
+   python3 tiered_filter.py --include-all-firms
    ```
 
 4. **Results**: Check the `output/` folder for timestamped results
 
+## ✨ Key Features
+
+- **Three-Tier System**: Tier 1 (Senior), Tier 2 (Junior), Tier 3 (Rescued from excluded firms)
+- **Smart Deduplication**: Removes duplicates based on name + firm
+- **Firm Limits**: Max 10 Tier 1 + 6 Tier 2 contacts per firm
+- **Firm Rescue**: `--include-all-firms` flag rescues top 1-3 contacts from excluded firms
+- **Optional Firm Exclusion**: Exclude specific firms using `firm exclusion.csv`
+- **Optional Contact Inclusion**: Force specific contacts using `include_contacts.csv`
+
 ## 📊 Filtering Logic
 
 ### Tier 1: Key Contacts (Senior Decision Makers)
-- **No investment team requirement** (prioritizes important titles)
+- **Targets**: CIO, Managing Director, Managing Partner, Fund Manager, President
 - **Max 10 contacts per firm**
-- **Targets**: CIO, Managing Director, Head of Investments, Portfolio Manager, President
+- **No investment team requirement**
 
-### Tier 2: Junior Contacts (Supporting Professionals)
-- **Must be on investment team** (prevents overly broad filtering)
-- **Max 6 contacts per firm**
+### Tier 2: Junior Contacts (Supporting Professionals)  
 - **Targets**: Analysts, Associates, Directors, Advisors
+- **Max 6 contacts per firm**
+- **Must be on investment team**
 
-## 🚫 Firm Exclusion Feature
-
-### Setup
-1. Place a file named `firm exclusion.csv` in the `/input` folder
-2. List firm names to exclude, one per line
-3. Run the filtering tool and choose "yes" when prompted
-
-### How It Works
-- **Case-insensitive matching**: "Goldman Sachs" matches "goldman sachs" in data
-- **Applied after deduplication**: Ensures clean exclusion without double-counting
-- **Complete firm exclusion**: All contacts from excluded firms are removed
-- **Detailed reporting**: Shows which excluded firms were found and removed
-
-## ✅ Contact Inclusion Feature
-
-### Setup
-1. Place a file named `include_contacts.csv` in the `/input` folder
-2. Use format: `Institution_Name,Full_Name` (with header row)
-3. List specific individuals to force through filters
-4. Run the filtering tool and choose "yes" when prompted
-
-### How It Works
-- **Individual targeting**: Targets specific people, not entire firms
-- **Bypass all filters**: Forces contacts through regardless of job title/team requirements
-- **Smart tier placement**: Places contacts in appropriate tier based on job title patterns
-- **Applied after standard filtering**: Adds missing contacts to existing results
-- **Comprehensive tracking**: Shows how many contacts were forced through filters
-
-### Example Format
-```csv
-Institution_Name,Full_Name
-Goldman Sachs,John Smith
-BlackRock,Jane Doe
-```
-
-## 📈 Data Processing Pipeline
-
-```
-Input Files → Combine → Standardize Columns → Remove Duplicates → [Optional: Firm Exclusion]
-     ↓
-Extract Email Patterns → Apply Tier 1 Filter → Apply Tier 2 Filter → [Optional: Contact Inclusion]
-     ↓
-Fill Missing Emails → Generate Output with Comprehensive Analytics
-```
+### Tier 3: Rescued Contacts (--include-all-firms only)
+- **Top 1-3 contacts from firms with zero Tier 1/2 contacts**
+- **Priority-based selection (CEOs, CFOs, Directors)**
+- **Reduces firm exclusion rate from ~40% to ~2.5%**
 
 ## 📊 Output Structure
 
 ### Excel Sheets:
-1. **Tier1_Key_Contacts**: Senior professionals with priority access
-2. **Tier2_Junior_Contacts**: Junior professionals with investment team focus
-3. **Processing_Summary**: Comprehensive statistics and metrics including:
-   - Firm exclusion impact (firms/contacts removed)
-   - Contact inclusion impact (contacts forced through filters)
-   - Average and median contacts per firm (before filtering and per tier)
-   - Processing pipeline metrics
-   - Email availability statistics
-4. **Input_File_Details**: Source file breakdown
-5. **Excluded_Firms_Analysis**: Complete analysis of excluded firms
-6. **Delta_Analysis**: Detailed breakdown of why contacts were included/excluded
+1. **Tier1_Key_Contacts**: Senior decision makers (680 contacts)
+2. **Tier2_Junior_Contacts**: Junior professionals (337 contacts)  
+3. **Tier3_Rescued_Contacts**: Rescued contacts (320 contacts) *[with --include-all-firms]*
+4. **Processing_Summary**: Statistics and metrics
+5. **Delta_Analysis**: Detailed filtering decisions
+6. **Excluded_Firms_Analysis**: Firm exclusion impact
 
-## 🧪 Testing
+## 🚫 Optional Features
 
-Run the demo to see all advanced features in action:
-```bash
-python3 tests/demo_firm_exclusion.py
-```
+### Firm Exclusion
+1. Create `input/firm exclusion.csv` with firm names to exclude
+2. Run filtering and choose "yes" when prompted
 
-This will generate four output files showing different configurations:
-- **With-Exclusion**: Firms removed, standard filtering
-- **With-Inclusion**: Standard filtering + forced contacts  
-- **With-Both**: Firms removed + forced contacts
-- **Standard**: Baseline with no special processing
+### Contact Inclusion  
+1. Create `input/include_contacts.csv` with format:
+   ```csv
+   Institution_Name,Full_Name
+   Goldman Sachs,John Smith
+   BlackRock,Jane Doe
+   ```
+2. Run filtering and choose "yes" when prompted
 
-## 📋 Example Usage
+## 📈 Results
 
-### Single File Input
-```
-input/
-└── Institutional_Contact_List.xlsx
+**Standard Filtering:**
+- 1,017 total contacts (680 Tier 1 + 337 Tier 2)
+- ~235 firms included, ~168 firms excluded (41.7%)
 
-Output: "Institutional_Contact_List_Tiered_List_[timestamp].xlsx"
-```
-
-### Multiple Files Input
-```
-input/
-├── Family_Office_Contacts.xlsx
-├── Institutional_Contacts.xlsx
-└── Additional_Contacts.xlsx
-
-Output: "Combined-Contacts_Tiered_List_[timestamp].xlsx"
-```
+**With --include-all-firms:**
+- 1,337 total contacts (680 Tier 1 + 337 Tier 2 + 320 Rescued)
+- ~393 firms included, ~10 firms excluded (2.5%)
+- **94% firm rescue rate!**
 
 ## 📝 Requirements
 
 - Python 3.7+
-- pandas
-- openpyxl
-- xlsxwriter
+- pandas, openpyxl, xlsxwriter
 
-Install with:
 ```bash
 pip install pandas openpyxl xlsxwriter
 ```
 
-## 🔧 Advanced Features
+## 🔧 Advanced Usage
 
-### Programmatic Usage
 ```python
 from tiered_filter import TieredFilter
 
@@ -182,43 +102,13 @@ filter_tool = TieredFilter()
 output_file = filter_tool.process_contacts(
     user_prefix="My-Contacts",
     enable_firm_exclusion=True,
-    enable_contact_inclusion=True
+    enable_contact_inclusion=True,
+    include_all_firms=True
 )
 ```
-
-### Custom Input/Output Folders
-```python
-filter_tool = TieredFilter(
-    input_folder="custom_input",
-    output_folder="custom_output"
-)
-```
-
-## 📊 Analytics & Metrics
-
-The system provides comprehensive analytics including:
-
-- **Processing Metrics**: Raw contacts, duplicates removed, retention rates
-- **Firm Statistics**: Unique firms, average/median contacts per firm
-- **Tier Analysis**: Contacts and firms per tier with distribution metrics
-- **Exclusion Impact**: Detailed breakdown of firm exclusion effects
-- **Inclusion Impact**: Tracking of contacts forced through filters
-- **Email Intelligence**: Pattern extraction and missing email filling statistics
-
-## 🗄️ Legacy Files
-
-Previous implementations and tools are archived in `/archive/legacy_filters/`:
-- `consolidated_tiered_filter.py` - Alternative implementation (experimental)
-- `unified_tiered_filter.py` - Original stable version (renamed to `tiered_filter.py`)
-
-## 🎯 Business Impact
-
-**Investment Outreach Optimization:**
-- **Quality over Quantity**: Prioritizes decision makers
-- **Firm Coverage**: Ensures broad institutional reach
-- **Contact Hierarchy**: Clear senior vs junior segmentation
-- **Data Quality**: Pattern-based email completion and validation
 
 ---
 
-*This system transforms raw contact databases into actionable, prioritized outreach lists optimized for investment fundraising and relationship building.*
+*Transforms raw contact databases into actionable, prioritized outreach lists optimized for investment fundraising.*
+
+For detailed feature roadmap and development plans, see [ROADMAP.md](ROADMAP.md).
