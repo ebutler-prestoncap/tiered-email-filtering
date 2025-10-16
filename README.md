@@ -18,6 +18,12 @@ A professional contact filtering tool that processes Excel contact lists and org
    
    # Include contacts from excluded firms
    python3 tiered_filter.py --include-all-firms
+   
+   # Discover firm email schemas and fill missing emails in tiers
+   python3 tiered_filter.py --find-emails
+
+   # Combine both (rescue excluded firms and fill emails)
+   python3 tiered_filter.py --include-all-firms --find-emails
    ```
 
 4. **Results**: Check the `output/` folder for timestamped results
@@ -72,6 +78,20 @@ A professional contact filtering tool that processes Excel contact lists and org
    BlackRock,Jane Doe
    ```
 2. Run filtering and choose "yes" when prompted
+
+### Email Discovery and Filling
+1. Run with `--find-emails` to enable discovery of firm email schemas from the original input files.
+2. The tool learns common domains (e.g., `acme.com`) and local-part patterns (e.g., `first.last`, `fLast`) per firm using existing emails.
+3. After tiering, missing emails in Tier 1 and Tier 2 are filled using the detected firm schema(s).
+4. Schemas considered:
+   - `first.last`, `first_last`, `firstlast`
+   - `fLast` (first initial + last), `firstL` (first + last initial)
+   - `last.first`, `last_first`, `lastfirst`, `lFirst` (last initial + first)
+   - `f.last` (first initial dot last), `f_last` (first initial underscore last), `first_l` (first underscore last initial)
+
+Notes:
+- Discovery uses only emails present in your input data; it does not scrape the web.
+- If a firm lacks any known emails, no filling occurs for that firm.
 
 ## 📈 Results
 

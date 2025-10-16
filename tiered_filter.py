@@ -48,6 +48,8 @@ class TieredFilter:
         
         # Toggle email filling (disabled for testing to avoid confusion)
         self.enable_email_fill = False
+        # Toggle email pattern finding and filling via CLI
+        self.enable_find_emails = False
         
         # Firm exclusion settings
         self.enable_firm_exclusion = False
@@ -688,6 +690,195 @@ class TieredFilter:
         return result_df
     
     # Email pattern extraction removed per request to simplify and avoid firm miscount.
+    def extract_email_patterns_by_firm(self, df: pd.DataFrame) -> Dict[str, Dict[str, List[str]]]:
+        """Extract firm email schemas and domains from the original standardized dataset.
+
+        Returns mapping: firm -> { 'domains': [domain,...], 'patterns': [patternCode,...] }
+        Supported pattern codes: 'first.last', 'fLast', 'firstL', 'first_last', 'firstlast'
+        """
+        logger.info("Extracting email schemas by firm from standardized input")
+        if len(df) == 0:
+            return {}
+
+        firm_to_domain_counts: Dict[str, Counter] = defaultdict(Counter)
+        firm_to_pattern_counts: Dict[str, Counter] = defaultdict(Counter)
+
+        def make_local(first: str, last: str, pattern: str) -> str:
+            f = first.lower()
+            l = last.lower()
+            if not f or not l:
+                return ''
+            if pattern == 'first.last':
+                return f"{f}.{l}"
+            if pattern == 'first_last':
+                return f"{f}_{l}"
+            if pattern == 'firstlast':
+                return f"{f}{l}"
+            if pattern == 'fLast':
+                return f"{f[0]}{l}"
+            if pattern == 'firstL':
+                return f"{f}{l[0]}"
+            if pattern == 'last.first':
+                return f"{l}.{f}"
+            if pattern == 'last_first':
+                return f"{l}_{f}"
+            if pattern == 'lastfirst':
+                return f"{l}{f}"
+            if pattern == 'lFirst':
+                return f"{l[0]}{f}"
+            if pattern == 'f.last':
+                return f"{f[0]}.{l}"
+            if pattern == 'f_last':
+                return f"{f[0]}_{l}"
+            if pattern == 'first_l':
+                return f"{f}_{l[0]}"
+            return ''
+
+        def get_first_last(name_val: Any, row: pd.Series) -> Tuple[str, str]:
+            first = str(row.get('First Name', '')).strip()
+            last = str(row.get('Last Name', '')).strip()
+            if first and last:
+                return first.lower(), last.lower()
+            # Fallback to splitting NAME
+            name = str(name_val).strip()
+            if not name:
+                return '', ''
+            parts = re.sub(r"[.,]", "", name).split()
+            if len(parts) >= 2:
+                return parts[0].lower(), parts[-1].lower()
+            return '', ''
+
+        for _, row in df.iterrows():
+            firm = str(row.get('INVESTOR', '')).strip()
+            email = str(row.get('EMAIL', '')).strip()
+            if not firm or not email or '@' not in email:
+                continue
+            local, domain = email.lower().split('@', 1)
+            first, last = get_first_last(row.get('NAME', ''), row)
+            if not first or not last:
+                continue
+
+            # Count domains
+            firm_to_domain_counts[firm][domain] += 1
+
+            # Detect pattern across expanded set
+            pattern_order = ['first.last','first_last','firstlast','fLast','firstL','last.first','last_first','lastfirst','lFirst','f.last','f_last','first_l']
+            for code in pattern_order:
+                candidate = make_local(first, last, code)
+                if candidate and local == candidate:
+                    firm_to_pattern_counts[firm][code] += 1
+                    break
+
+        # Build final mapping selecting most common domains/patterns
+        firm_patterns: Dict[str, Dict[str, List[str]]] = {}
+        for firm, domain_counts in firm_to_domain_counts.items():
+            top_domains = [d for d, _ in domain_counts.most_common(3)]
+            pattern_counts = firm_to_pattern_counts.get(firm, Counter())
+            top_patterns = [p for p, _ in pattern_counts.most_common(3)] or ['first.last']
+            firm_patterns[firm] = {'domains': top_domains, 'patterns': top_patterns}
+
+        logger.info(f"Extracted email schemas for {len(firm_patterns)} firms")
+        return firm_patterns
+
+    def fill_missing_emails_with_patterns(self, df: pd.DataFrame, firm_patterns: Dict[str, Dict[str, List[str]]]) -> pd.DataFrame:
+        """Fill missing emails using detected firm domains and local-part patterns."""
+        if len(df) == 0:
+            return df
+        df_filled = df.copy()
+
+        # Ensure annotation columns exist
+        if 'EMAIL_STATUS' not in df_filled.columns:
+            df_filled['EMAIL_STATUS'] = ''
+        if 'EMAIL_SCHEMA' not in df_filled.columns:
+            df_filled['EMAIL_SCHEMA'] = ''
+
+        def gen_email(first: str, last: str, domain: str, pattern: str) -> str:
+            fl = first.lower().replace('.', '').replace(',', '').strip()
+            ll = last.lower().replace('.', '').replace(',', '').strip()
+            if not fl or not ll or not domain:
+                return ''
+            if pattern == 'first.last':
+                local = f"{fl}.{ll}"
+            elif pattern == 'first_last':
+                local = f"{fl}_{ll}"
+            elif pattern == 'firstlast':
+                local = f"{fl}{ll}"
+            elif pattern == 'fLast':
+                local = f"{fl[0]}{ll}"
+            elif pattern == 'firstL':
+                local = f"{fl}{ll[0]}"
+            elif pattern == 'last.first':
+                local = f"{ll}.{fl}"
+            elif pattern == 'last_first':
+                local = f"{ll}_{fl}"
+            elif pattern == 'lastfirst':
+                local = f"{ll}{fl}"
+            elif pattern == 'lFirst':
+                local = f"{ll[0]}{fl}"
+            elif pattern == 'f.last':
+                local = f"{fl[0]}.{ll}"
+            elif pattern == 'f_last':
+                local = f"{fl[0]}_{ll}"
+            elif pattern == 'first_l':
+                local = f"{fl}_{ll[0]}"
+            else:
+                local = f"{fl}.{ll}"
+            return f"{local}@{domain}"
+
+        for idx, row in df_filled.iterrows():
+            current = str(row.get('EMAIL', '')).strip()
+            if current:
+                # Mark existing
+                if not str(row.get('EMAIL_STATUS', '')).strip():
+                    df_filled.at[idx, 'EMAIL_STATUS'] = 'existing'
+                continue
+            firm = str(row.get('INVESTOR', '')).strip()
+            name = str(row.get('NAME', '')).strip()
+            if not firm or not name or firm not in firm_patterns:
+                continue
+
+            parts = re.sub(r"[.,]", "", name.lower()).split()
+            if len(parts) < 2:
+                continue
+            first, last = parts[0], parts[-1]
+            domains = firm_patterns[firm].get('domains', [])
+            patterns = firm_patterns[firm].get('patterns', [])
+            if not domains:
+                continue
+            domain = domains[0]
+            # Try each known pattern; fall back to first.last
+            tried_patterns = patterns or ['first.last']
+            filled = ''
+            for pat in tried_patterns:
+                candidate = gen_email(first, last, domain, pat)
+                if candidate:
+                    filled = candidate
+                    used_pattern = pat
+                    break
+            if filled:
+                df_filled.at[idx, 'EMAIL'] = filled
+                df_filled.at[idx, 'EMAIL_STATUS'] = 'estimated'
+                df_filled.at[idx, 'EMAIL_SCHEMA'] = used_pattern
+        return df_filled
+
+    def annotate_email_status(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Annotate EMAIL_STATUS as 'existing' or 'missing' where not already set."""
+        if len(df) == 0:
+            return df
+        annotated = df.copy()
+        if 'EMAIL_STATUS' not in annotated.columns:
+            annotated['EMAIL_STATUS'] = ''
+        if 'EMAIL_SCHEMA' not in annotated.columns:
+            annotated['EMAIL_SCHEMA'] = ''
+        for idx, row in annotated.iterrows():
+            status = str(row.get('EMAIL_STATUS', '')).strip()
+            email_val = str(row.get('EMAIL', '')).strip()
+            if not status:
+                if email_val:
+                    annotated.at[idx, 'EMAIL_STATUS'] = 'existing'
+                else:
+                    annotated.at[idx, 'EMAIL_STATUS'] = 'missing'
+        return annotated
     
     def create_tier1_config(self) -> Dict[str, Any]:
         """Create Tier 1 filter configuration (key contacts, no investment team requirement)"""
@@ -888,7 +1079,7 @@ class TieredFilter:
         
         with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
             # Define desired column order for standardized output
-            standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'JOB_TITLE']
+            standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE']
             
             # Add First Name and Last Name if they exist in the data
             if 'First Name' in tier1_df.columns:
@@ -1138,7 +1329,7 @@ class TieredFilter:
                     excluded_contacts_df = excluded_firms_analysis['excluded_firm_contacts']
                     
                     # Organize columns for better readability
-                    standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'JOB_TITLE']
+                    standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE']
                     available_std_cols = [col for col in standard_columns if col in excluded_contacts_df.columns]
                     other_cols = [col for col in excluded_contacts_df.columns if col not in available_std_cols]
                     excluded_contacts_reordered = excluded_contacts_df[available_std_cols + other_cols]
@@ -1292,7 +1483,7 @@ class TieredFilter:
         
         return rescued_df, rescue_stats
     
-    def process_contacts(self, user_prefix: str = None, enable_firm_exclusion: bool = False, enable_contact_inclusion: bool = False, include_all_firms: bool = False) -> str:
+    def process_contacts(self, user_prefix: str = None, enable_firm_exclusion: bool = False, enable_contact_inclusion: bool = False, include_all_firms: bool = False, enable_find_emails: bool = False) -> str:
         """Main processing function"""
         logger.info("Starting tiered filtering process")
         
@@ -1343,6 +1534,17 @@ class TieredFilter:
         if self.enable_contact_inclusion:
             tier1_df, tier2_df = self.apply_contact_inclusion(tier1_df, tier2_df, deduplicated_df)
         
+        # 4.5. If enabled, extract email schemas from standardized data and fill missing emails in tiers
+        self.enable_find_emails = enable_find_emails
+        firm_patterns = {}
+        if self.enable_find_emails:
+            logger.info("Email schema discovery enabled: extracting and filling emails")
+            firm_patterns = self.extract_email_patterns_by_firm(standardized_df)
+            if len(tier1_df) > 0:
+                tier1_df = self.fill_missing_emails_with_patterns(tier1_df, firm_patterns)
+            if len(tier2_df) > 0:
+                tier2_df = self.fill_missing_emails_with_patterns(tier2_df, firm_patterns)
+
         # 5. Create delta analysis
         delta_df = self.create_delta_analysis(combined_df, standardized_df, deduplicated_df, tier1_df, tier2_df, tier1_config, tier2_config)
         
@@ -1358,7 +1560,18 @@ class TieredFilter:
                 # Add rescued contacts as a new tier (Tier 3 - Rescued Contacts)
                 rescued_df['tier_type'] = 'Tier 3 - Rescued Contacts'
                 logger.info(f"Added {len(rescued_df)} rescued contacts from {rescue_stats['rescued_firms']} firms")
+                # If email discovery is enabled, also fill/annotate rescued contacts
+                if self.enable_find_emails and firm_patterns:
+                    rescued_df = self.fill_missing_emails_with_patterns(rescued_df, firm_patterns)
         
+        # 5.6. Annotate email status for all tiers (ensure existing/missing set)
+        if len(tier1_df) > 0:
+            tier1_df = self.annotate_email_status(tier1_df)
+        if len(tier2_df) > 0:
+            tier2_df = self.annotate_email_status(tier2_df)
+        if include_all_firms and len(rescued_df) > 0:
+            rescued_df = self.annotate_email_status(rescued_df)
+
         # 6. Create excluded firms analysis (after rescue)
         excluded_firms_analysis = self.create_excluded_firms_analysis(deduplicated_df, tier1_df, tier2_df, rescued_df if include_all_firms else pd.DataFrame())
         
@@ -1383,6 +1596,8 @@ def main():
     parser = argparse.ArgumentParser(description='Tiered Contact Filter')
     parser.add_argument('--include-all-firms', action='store_true', 
                        help='Include top 1-3 contacts from firms with zero contacts in Tiers 1/2')
+    parser.add_argument('--find-emails', action='store_true',
+                       help='Discover firm email schemas from input and fill missing emails in tiers')
     args = parser.parse_args()
     
     print("🚀 TIERED CONTACT FILTER")
@@ -1465,7 +1680,7 @@ def main():
     
     try:
         # Process contacts
-        output_file = filter_tool.process_contacts(user_prefix, enable_firm_exclusion, enable_contact_inclusion, args.include_all_firms)
+        output_file = filter_tool.process_contacts(user_prefix, enable_firm_exclusion, enable_contact_inclusion, args.include_all_firms, args.find_emails)
         
         print()
         print("=" * 60)
