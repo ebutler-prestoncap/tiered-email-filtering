@@ -175,13 +175,8 @@ class FilterService:
         )
         
         # Extract analytics before creating Excel
-        # Import here to avoid circular dependencies
-        import importlib.util
-        analytics_path = Path(__file__).parent / "analytics_extractor.py"
-        spec = importlib.util.spec_from_file_location("analytics_extractor", analytics_path)
-        analytics_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(analytics_module)
-        analytics = analytics_module.extract_analytics(
+        from api.analytics_extractor import extract_analytics
+        analytics = extract_analytics(
             tier1_df, tier2_df, rescued_df, file_info, dedup_count,
             deduplicated_df, delta_df, excluded_firms_analysis,
             rescue_stats, self.filter

@@ -8,13 +8,13 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import logging
 
-from backend.config import (
+from config import (
     DATABASE_PATH, UPLOAD_FOLDER, RESULTS_FOLDER,
     CORS_ORIGINS, MAX_CONTENT_LENGTH, FILE_RETENTION_DAYS
 )
-from backend.database import Database
-from backend.api.upload_handler import save_uploaded_files, cleanup_files
-from backend.api.filter_service import FilterService
+from database import Database
+from api.upload_handler import save_uploaded_files, cleanup_files
+from api.filter_service import FilterService
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
