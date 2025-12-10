@@ -10,7 +10,17 @@ import './ProcessPage.css';
 export default function ProcessPage() {
   const navigate = useNavigate();
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [settings, setSettings] = useState<ProcessingSettings | null>(null);
+  // Initialize with default values - ConfigurationPanel will update with preset
+  const [settings, setSettings] = useState<ProcessingSettings>({
+    includeAllFirms: false,
+    findEmails: false,
+    firmExclusion: false,
+    contactInclusion: false,
+    tier1Limit: 10,
+    tier2Limit: 6,
+    tier3Limit: 3,
+    userPrefix: 'Combined-Contacts',
+  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
@@ -33,10 +43,6 @@ export default function ProcessPage() {
   };
 
   const handleProcess = async () => {
-    if (!settings) {
-      alert('Please wait for configuration to load');
-      return;
-    }
     if (uploadedFiles.length === 0) {
       alert('Please upload at least one Excel file');
       return;
@@ -115,18 +121,12 @@ export default function ProcessPage() {
         </div>
 
         <div className="process-right">
-          {settings ? (
-            <ConfigurationPanel
-              settings={settings}
-              onSettingsChange={setSettings}
-              onProcess={handleProcess}
-              isProcessing={isProcessing}
-            />
-          ) : (
-            <div className="config-panel">
-              <p>Loading configuration...</p>
-            </div>
-          )}
+          <ConfigurationPanel
+            settings={settings}
+            onSettingsChange={setSettings}
+            onProcess={handleProcess}
+            isProcessing={isProcessing}
+          />
         </div>
       </div>
     </div>
