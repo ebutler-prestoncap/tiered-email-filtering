@@ -18,24 +18,48 @@ A modern web application for processing and filtering contact lists with compreh
 - **Frontend**: React + TypeScript with Vite
 - **Design**: Ultra-minimalist Apple-esque UI
 
-## Setup
+## Quick Start (Local Deployment)
 
-### Backend
+### Option 1: Automated Setup (Recommended)
 
-1. Install Python dependencies:
+**Linux/Mac:**
+```bash
+./setup.sh
+./run-backend.sh    # Terminal 1
+./run-frontend.sh    # Terminal 2
+```
+
+**Windows:**
+```cmd
+setup.bat
+run-backend.bat      # Command Prompt 1
+run-frontend.bat     # Command Prompt 2
+```
+
+### Option 2: Manual Setup
+
+**Backend:**
+
+1. Create virtual environment (recommended):
 ```bash
 cd backend
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+2. Install dependencies:
+```bash
 pip install -r requirements.txt
 ```
 
-2. Run the Flask server:
+3. Run the Flask server:
 ```bash
 python app.py
 ```
 
 The API will be available at `http://localhost:5000`
 
-### Frontend
+**Frontend:**
 
 1. Install Node.js dependencies:
 ```bash
@@ -49,6 +73,12 @@ npm run dev
 ```
 
 The app will be available at `http://localhost:3000`
+
+### Prerequisites
+
+- **Python 3.7+** with pip
+- **Node.js 16+** with npm
+- **Excel files** to process (`.xlsx` or `.xls` format)
 
 ## Usage
 
