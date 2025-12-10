@@ -86,7 +86,18 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         
+        # Import tier config utils for default keywords
+        from api.tier_config_utils import (
+            get_default_tier1_keywords,
+            get_default_tier2_keywords,
+            get_default_tier3_keywords
+        )
+        
         # Default settings matching TieredFilter class defaults
+        default_tier1 = get_default_tier1_keywords()
+        default_tier2 = get_default_tier2_keywords()
+        default_tier3 = get_default_tier3_keywords()
+        
         default_settings = {
             "includeAllFirms": False,  # --include-all-firms flag (default: False)
             "findEmails": False,  # --find-emails flag (default: False)
@@ -95,7 +106,22 @@ class Database:
             "tier1Limit": 10,  # tier1_limit (default: 10)
             "tier2Limit": 6,  # tier2_limit (default: 6)
             "tier3Limit": 3,  # Tier 3 limit when enabled (default: 3)
-            "userPrefix": "Combined-Contacts"  # Default prefix
+            "userPrefix": "Combined-Contacts",  # Default prefix
+            "tier1Filters": {
+                "includeKeywords": default_tier1["include"],
+                "excludeKeywords": default_tier1["exclude"],
+                "requireInvestmentTeam": False
+            },
+            "tier2Filters": {
+                "includeKeywords": default_tier2["include"],
+                "excludeKeywords": default_tier2["exclude"],
+                "requireInvestmentTeam": True
+            },
+            "tier3Filters": {
+                "includeKeywords": default_tier3["include"],
+                "excludeKeywords": default_tier3["exclude"],
+                "requireInvestmentTeam": False
+            }
         }
         
         # Check if default preset exists

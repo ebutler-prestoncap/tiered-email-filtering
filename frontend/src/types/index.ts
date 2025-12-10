@@ -2,6 +2,12 @@
  * TypeScript interfaces for the application
  */
 
+export interface TierFilterConfig {
+  includeKeywords: string[];  // Job titles/keywords to include
+  excludeKeywords: string[];  // Job titles/keywords to exclude
+  requireInvestmentTeam: boolean;  // Whether investment team role is required
+}
+
 export interface ProcessingSettings {
   includeAllFirms: boolean;
   findEmails: boolean;
@@ -11,6 +17,9 @@ export interface ProcessingSettings {
   tier2Limit: number;
   tier3Limit: number;
   userPrefix: string;
+  tier1Filters?: TierFilterConfig;  // Custom Tier 1 filter configuration
+  tier2Filters?: TierFilterConfig;  // Custom Tier 2 filter configuration
+  tier3Filters?: TierFilterConfig;  // Custom Tier 3 filter configuration
 }
 
 export interface SettingsPreset {

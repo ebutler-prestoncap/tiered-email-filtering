@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import type { ProcessingSettings, SettingsPreset } from '../types';
+import type { ProcessingSettings, SettingsPreset, TierFilterConfig } from '../types';
 import { getPresets, createPreset, updatePreset } from '../services/api';
+import TierFilterConfigComponent from './TierFilterConfig';
 import './ConfigurationPanel.css';
 
 interface ConfigurationPanelProps {
@@ -47,6 +48,21 @@ export default function ConfigurationPanel({
           tier2Limit: 6,
           tier3Limit: 3,
           userPrefix: 'Combined-Contacts',
+          tier1Filters: {
+            includeKeywords: ['cio', 'chief investment officer', 'portfolio manager', 'director'],
+            excludeKeywords: ['operations', 'hr', 'marketing'],
+            requireInvestmentTeam: false,
+          },
+          tier2Filters: {
+            includeKeywords: ['analyst', 'associate', 'director'],
+            excludeKeywords: ['operations', 'hr', 'marketing'],
+            requireInvestmentTeam: true,
+          },
+          tier3Filters: {
+            includeKeywords: ['ceo', 'cfo', 'director'],
+            excludeKeywords: [],
+            requireInvestmentTeam: false,
+          },
         };
         onSettingsChange(fallbackSettings);
       }
@@ -62,6 +78,21 @@ export default function ConfigurationPanel({
         tier2Limit: 6,
         tier3Limit: 3,
         userPrefix: 'Combined-Contacts',
+        tier1Filters: {
+          includeKeywords: ['cio', 'chief investment officer', 'portfolio manager', 'director'],
+          excludeKeywords: ['operations', 'hr', 'marketing'],
+          requireInvestmentTeam: false,
+        },
+        tier2Filters: {
+          includeKeywords: ['analyst', 'associate', 'director'],
+          excludeKeywords: ['operations', 'hr', 'marketing'],
+          requireInvestmentTeam: true,
+        },
+        tier3Filters: {
+          includeKeywords: ['ceo', 'cfo', 'director'],
+          excludeKeywords: [],
+          requireInvestmentTeam: false,
+        },
       };
       onSettingsChange(fallbackSettings);
     }
@@ -201,6 +232,38 @@ export default function ConfigurationPanel({
           </label>
           <p className="config-hint">Force specific contacts through filters (requires contact inclusion CSV)</p>
         </div>
+      </div>
+
+      {/* Tier Filter Configuration */}
+      <div className="config-group">
+        <h3 className="config-group-title">Tier Filter Configuration</h3>
+        <p className="config-hint" style={{ marginBottom: 'var(--spacing-md)' }}>
+          Configure which job titles are included or excluded for each tier. Keywords are case-insensitive.
+        </p>
+        
+        {settings.tier1Filters && (
+          <TierFilterConfigComponent
+            tierNumber={1}
+            config={settings.tier1Filters}
+            onChange={(config) => updateSetting('tier1Filters', config)}
+          />
+        )}
+        
+        {settings.tier2Filters && (
+          <TierFilterConfigComponent
+            tierNumber={2}
+            config={settings.tier2Filters}
+            onChange={(config) => updateSetting('tier2Filters', config)}
+          />
+        )}
+        
+        {settings.tier3Filters && settings.includeAllFirms && (
+          <TierFilterConfigComponent
+            tierNumber={3}
+            config={settings.tier3Filters}
+            onChange={(config) => updateSetting('tier3Filters', config)}
+          />
+        )}
       </div>
 
       {/* Output Settings */}

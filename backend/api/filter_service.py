@@ -11,6 +11,12 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from tiered_filter import TieredFilter
+from api.tier_config_utils import (
+    create_tier_config_from_keywords,
+    get_default_tier1_keywords,
+    get_default_tier2_keywords,
+    get_default_tier3_keywords
+)
 
 logger = logging.getLogger(__name__)
 
@@ -123,9 +129,31 @@ class FilterService:
             self.filter.pre_exclusion_count = len(deduplicated_df)
             deduplicated_df = self.filter.apply_firm_exclusion(deduplicated_df)
         
-        # Apply tier filtering
-        tier1_config = self.filter.create_tier1_config()
-        tier2_config = self.filter.create_tier2_config()
+        # Apply tier filtering - use custom configs if provided, otherwise defaults
+        tier1_filters = settings.get("tier1Filters")
+        tier2_filters = settings.get("tier2Filters")
+        
+        if tier1_filters:
+            tier1_config = create_tier_config_from_keywords(
+                name='Tier 1 - Key Contacts',
+                description='Senior decision makers and key investment professionals',
+                include_keywords=tier1_filters.get("includeKeywords", []),
+                exclude_keywords=tier1_filters.get("excludeKeywords", []),
+                require_investment_team=tier1_filters.get("requireInvestmentTeam", False)
+            )
+        else:
+            tier1_config = self.filter.create_tier1_config()
+        
+        if tier2_filters:
+            tier2_config = create_tier_config_from_keywords(
+                name='Tier 2 - Junior Contacts',
+                description='Junior investment professionals (must be on investment team)',
+                include_keywords=tier2_filters.get("includeKeywords", []),
+                exclude_keywords=tier2_filters.get("excludeKeywords", []),
+                require_investment_team=tier2_filters.get("requireInvestmentTeam", True)
+            )
+        else:
+            tier2_config = self.filter.create_tier2_config()
         
         tier1_df = self.filter.apply_tier_filter(deduplicated_df, tier1_config, self.filter.tier1_limit)
         tier2_df = self.filter.apply_tier_filter(deduplicated_df, tier2_config, self.filter.tier2_limit)

@@ -96,7 +96,19 @@ def process_contacts():
         job_id = db.create_job(settings, files)
         
         # Get full paths for uploaded files
-        uploaded_files = [str(UPLOAD_FOLDER / Path(f).name) for f in files]
+        # Files array should contain the paths returned from upload endpoint (UUID filenames)
+        uploaded_files = []
+        for f in files:
+            # Check if it's already a full path
+            if Path(f).is_absolute() and Path(f).exists():
+                uploaded_files.append(str(Path(f)))
+            else:
+                # Assume it's a filename in the upload folder
+                file_path = UPLOAD_FOLDER / Path(f).name
+                if file_path.exists():
+                    uploaded_files.append(str(file_path))
+                else:
+                    raise ValueError(f"Could not find uploaded file: {f} (checked {file_path})")
         
         # Start background processing
         thread = threading.Thread(

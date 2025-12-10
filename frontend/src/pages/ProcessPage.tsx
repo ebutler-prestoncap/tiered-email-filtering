@@ -20,6 +20,21 @@ export default function ProcessPage() {
     tier2Limit: 6,
     tier3Limit: 3,
     userPrefix: 'Combined-Contacts',
+    tier1Filters: {
+      includeKeywords: [],
+      excludeKeywords: [],
+      requireInvestmentTeam: false,
+    },
+    tier2Filters: {
+      includeKeywords: [],
+      excludeKeywords: [],
+      requireInvestmentTeam: true,
+    },
+    tier3Filters: {
+      includeKeywords: [],
+      excludeKeywords: [],
+      requireInvestmentTeam: false,
+    },
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | null>(null);
@@ -55,8 +70,8 @@ export default function ProcessPage() {
       // Upload files
       const uploadResult = await uploadFiles(uploadedFiles);
       
-      // Start processing
-      const processResult = await processContacts(uploadResult.files, settings);
+      // Start processing - use paths (UUID filenames) not original names
+      const processResult = await processContacts(uploadResult.paths || uploadResult.files, settings);
       
       setCurrentJobId(processResult.jobId);
       setProcessingStatus('processing');
