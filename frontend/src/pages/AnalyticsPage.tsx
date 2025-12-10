@@ -115,6 +115,14 @@ export default function AnalyticsPage() {
 
   const analytics = job.analytics;
   const summary = analytics?.processing_summary;
+  
+  // Get removed contacts count for each tier from delta analysis
+  const getRemovedCount = (tier: string) => {
+    if (!analytics?.delta_analysis || !Array.isArray(analytics.delta_analysis)) return 0;
+    return analytics.delta_analysis.filter((item: any) => 
+      item.PROCESSING_STATUS === 'Removed' && item.TIER === tier
+    ).length;
+  };
 
   return (
     <div className="analytics-page">
