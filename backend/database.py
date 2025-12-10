@@ -86,33 +86,46 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        # Check if default preset exists
-        cursor.execute("SELECT id FROM settings_presets WHERE is_default = 1")
-        if cursor.fetchone():
-            conn.close()
-            return
-        
-        # Create default preset
+        # Default settings matching TieredFilter class defaults
         default_settings = {
-            "includeAllFirms": False,
-            "findEmails": False,
-            "firmExclusion": False,
-            "contactInclusion": False,
-            "tier1Limit": 10,
-            "tier2Limit": 6,
-            "tier3Limit": 3,
-            "userPrefix": "Combined-Contacts"
+            "includeAllFirms": False,  # --include-all-firms flag (default: False)
+            "findEmails": False,  # --find-emails flag (default: False)
+            "firmExclusion": False,  # enable_firm_exclusion (default: False)
+            "contactInclusion": False,  # enable_contact_inclusion (default: False)
+            "tier1Limit": 10,  # tier1_limit (default: 10)
+            "tier2Limit": 6,  # tier2_limit (default: 6)
+            "tier3Limit": 3,  # Tier 3 limit when enabled (default: 3)
+            "userPrefix": "Combined-Contacts"  # Default prefix
         }
         
-        preset_id = str(uuid.uuid4())
-        cursor.execute("""
-            INSERT INTO settings_presets (id, name, is_default, settings)
-            VALUES (?, ?, ?, ?)
-        """, (preset_id, "Default", 1, json.dumps(default_settings)))
+        # Check if default preset exists
+        cursor.execute("SELECT id, settings FROM settings_presets WHERE is_default = 1")
+        existing = cursor.fetchone()
         
-        conn.commit()
+        if existing:
+            # Update existing default preset to ensure it matches current defaults
+            existing_settings = json.loads(existing['settings'])
+            if existing_settings != default_settings:
+                logger.info("Updating default preset to match CLI defaults")
+                cursor.execute("""
+                    UPDATE settings_presets 
+                    SET settings = ?, name = 'Default (CLI Match)'
+                    WHERE id = ?
+                """, (json.dumps(default_settings), existing['id']))
+                conn.commit()
+            else:
+                logger.info("Default preset already matches CLI defaults")
+        else:
+            # Create default preset
+            preset_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO settings_presets (id, name, is_default, settings)
+                VALUES (?, ?, ?, ?)
+            """, (preset_id, "Default (CLI Match)", 1, json.dumps(default_settings)))
+            conn.commit()
+            logger.info("Default preset initialized with CLI matching settings")
+        
         conn.close()
-        logger.info("Default preset initialized")
     
     def create_job(self, settings: Dict, input_files: List[str]) -> str:
         """Create a new processing job"""
