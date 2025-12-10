@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { ProcessingSettings, SettingsPreset } from '../types';
-import { getPresets } from '../services/api';
+import { getPresets, createPreset, updatePreset } from '../services/api';
 import './ConfigurationPanel.css';
 
 interface ConfigurationPanelProps {
@@ -18,6 +18,9 @@ export default function ConfigurationPanel({
 }: ConfigurationPanelProps) {
   const [presets, setPresets] = useState<SettingsPreset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<string>('');
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [savePresetName, setSavePresetName] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     loadPresets();
@@ -216,14 +219,102 @@ export default function ConfigurationPanel({
         </div>
       </div>
 
-      <button
-        className="process-button"
-        onClick={onProcess}
-        disabled={isProcessing}
-      >
-        {isProcessing ? 'Processing...' : 'Process Contacts'}
-      </button>
+      <div className="config-actions">
+        <button
+          className="save-preset-button"
+          onClick={() => setShowSaveDialog(true)}
+          disabled={isProcessing}
+        >
+          Save as Preset
+        </button>
+        <button
+          className="process-button"
+          onClick={onProcess}
+          disabled={isProcessing}
+        >
+          {isProcessing ? 'Processing...' : 'Process Contacts'}
+        </button>
+      </div>
+
+      {showSaveDialog && (
+        <div className="save-dialog-overlay" onClick={() => setShowSaveDialog(false)}>
+          <div className="save-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Save Configuration as Preset</h3>
+            <div className="save-dialog-content">
+              <label>
+                Preset Name:
+                <input
+                  type="text"
+                  className="preset-name-input"
+                  value={savePresetName}
+                  onChange={(e) => setSavePresetName(e.target.value)}
+                  placeholder="Enter preset name"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && savePresetName.trim()) {
+                      handleSavePreset();
+                    } else if (e.key === 'Escape') {
+                      setShowSaveDialog(false);
+                    }
+                  }}
+                />
+              </label>
+              <div className="save-dialog-actions">
+                <button
+                  className="cancel-button"
+                  onClick={() => {
+                    setShowSaveDialog(false);
+                    setSavePresetName('');
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="save-button"
+                  onClick={handleSavePreset}
+                  disabled={!savePresetName.trim() || isSaving}
+                >
+                  {isSaving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+
+  async function handleSavePreset() {
+    if (!savePresetName.trim()) {
+      alert('Please enter a preset name');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Check if we're updating an existing preset
+      if (selectedPresetId && !presets.find(p => p.id === selectedPresetId)?.is_default) {
+        await updatePreset(selectedPresetId, savePresetName, settings);
+        alert('Preset updated successfully!');
+      } else {
+        await createPreset(savePresetName, settings);
+        alert('Preset saved successfully!');
+      }
+      setShowSaveDialog(false);
+      setSavePresetName('');
+      await loadPresets();
+      // Select the newly created/updated preset
+      const updatedPresets = await getPresets();
+      const newPreset = updatedPresets.find(p => p.name === savePresetName);
+      if (newPreset) {
+        setSelectedPresetId(newPreset.id);
+      }
+    } catch (error) {
+      console.error('Failed to save preset:', error);
+      alert('Failed to save preset. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
 }
 

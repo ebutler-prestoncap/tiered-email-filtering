@@ -293,6 +293,47 @@ class Database:
         conn.close()
         return presets
     
+    def update_preset(self, preset_id: str, name: str = None, settings: Dict = None) -> bool:
+        """Update a preset's name and/or settings (cannot update default)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Check if it's the default preset
+        cursor.execute("SELECT is_default FROM settings_presets WHERE id = ?", (preset_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+        
+        if row["is_default"]:
+            conn.close()
+            return False  # Cannot update default preset
+        
+        # Build update query
+        updates = []
+        params = []
+        
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        
+        if settings is not None:
+            updates.append("settings = ?")
+            params.append(json.dumps(settings))
+        
+        if not updates:
+            conn.close()
+            return False
+        
+        params.append(preset_id)
+        query = f"UPDATE settings_presets SET {', '.join(updates)} WHERE id = ?"
+        cursor.execute(query, params)
+        
+        updated = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return updated
+    
     def delete_preset(self, preset_id: str) -> bool:
         """Delete a preset (cannot delete default)"""
         conn = self.get_connection()

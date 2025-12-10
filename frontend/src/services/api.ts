@@ -108,6 +108,21 @@ export const createPreset = async (name: string, settings: ProcessingSettings): 
   return response.data.presetId;
 };
 
+export const updatePreset = async (
+  presetId: string,
+  name?: string,
+  settings?: ProcessingSettings
+): Promise<void> => {
+  const response = await api.put<{ success: boolean }>(`/settings/presets/${presetId}`, {
+    name,
+    settings,
+  });
+  
+  if (!response.data.success) {
+    throw new Error('Failed to update preset');
+  }
+};
+
 export const deletePreset = async (presetId: string): Promise<void> => {
   const response = await api.delete<{ success: boolean }>(`/settings/presets/${presetId}`);
   

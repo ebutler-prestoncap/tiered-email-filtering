@@ -258,6 +258,27 @@ def create_preset():
         logger.error(f"Create preset error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/settings/presets/<preset_id>', methods=['PUT'])
+def update_preset(preset_id: str):
+    """Update a settings preset"""
+    try:
+        data = request.json
+        name = data.get("name")
+        settings = data.get("settings")
+        
+        if name is None and settings is None:
+            return jsonify({"success": False, "error": "Name or settings required"}), 400
+        
+        updated = db.update_preset(preset_id, name=name, settings=settings)
+        if updated:
+            return jsonify({"success": True}), 200
+        else:
+            return jsonify({"success": False, "error": "Could not update preset (may be default or not found)"}), 400
+        
+    except Exception as e:
+        logger.error(f"Update preset error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/settings/presets/<preset_id>', methods=['DELETE'])
 def delete_preset(preset_id: str):
     """Delete a settings preset"""

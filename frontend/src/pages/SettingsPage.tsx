@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getPresets, createPreset, deletePreset } from '../services/api';
+import { getPresets, createPreset, updatePreset, deletePreset } from '../services/api';
 import type { SettingsPreset, ProcessingSettings } from '../types';
 import './SettingsPage.css';
 
@@ -8,6 +8,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [newPresetName, setNewPresetName] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingPreset, setEditingPreset] = useState<SettingsPreset | null>(null);
+  const [editSettings, setEditSettings] = useState<ProcessingSettings | null>(null);
 
   useEffect(() => {
     loadPresets();
@@ -52,6 +54,35 @@ export default function SettingsPage() {
       alert('Failed to create preset');
       console.error(error);
     }
+  };
+
+  const handleEditPreset = (preset: SettingsPreset) => {
+    if (preset.is_default) {
+      alert('Cannot edit the default preset');
+      return;
+    }
+    setEditingPreset(preset);
+    setEditSettings({ ...preset.settings });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingPreset || !editSettings) return;
+
+    try {
+      await updatePreset(editingPreset.id, editingPreset.name, editSettings);
+      setEditingPreset(null);
+      setEditSettings(null);
+      loadPresets();
+      alert('Preset updated successfully!');
+    } catch (error) {
+      alert('Failed to update preset');
+      console.error(error);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingPreset(null);
+    setEditSettings(null);
   };
 
   const handleDeletePreset = async (presetId: string) => {
@@ -148,34 +179,164 @@ export default function SettingsPage() {
           <div className="presets-list">
             {customPresets.map(preset => (
               <div key={preset.id} className="preset-card">
-                <div className="preset-header">
-                  <div className="preset-name">{preset.name}</div>
-                  <button
-                    className="preset-delete"
-                    onClick={() => handleDeletePreset(preset.id)}
-                    aria-label="Delete preset"
-                  >
-                    ×
-                  </button>
-                </div>
-                <div className="preset-settings">
-                  <div className="setting-item">
-                    <span className="setting-label">Include All Firms:</span>
-                    <span className="setting-value">{preset.settings.includeAllFirms ? 'Yes' : 'No'}</span>
+                {editingPreset?.id === preset.id ? (
+                  <div className="preset-edit-form">
+                    <h4>Edit Preset: {preset.name}</h4>
+                    <div className="edit-settings-grid">
+                      <div className="edit-setting">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={editSettings?.includeAllFirms || false}
+                            onChange={(e) => setEditSettings(prev => prev ? { ...prev, includeAllFirms: e.target.checked } : null)}
+                          />
+                          Include All Firms
+                        </label>
+                      </div>
+                      <div className="edit-setting">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={editSettings?.findEmails || false}
+                            onChange={(e) => setEditSettings(prev => prev ? { ...prev, findEmails: e.target.checked } : null)}
+                          />
+                          Find Emails
+                        </label>
+                      </div>
+                      <div className="edit-setting">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={editSettings?.firmExclusion || false}
+                            onChange={(e) => setEditSettings(prev => prev ? { ...prev, firmExclusion: e.target.checked } : null)}
+                          />
+                          Firm Exclusion
+                        </label>
+                      </div>
+                      <div className="edit-setting">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={editSettings?.contactInclusion || false}
+                            onChange={(e) => setEditSettings(prev => prev ? { ...prev, contactInclusion: e.target.checked } : null)}
+                          />
+                          Contact Inclusion
+                        </label>
+                      </div>
+                      <div className="edit-setting">
+                        <label>
+                          Tier 1 Limit:
+                          <input
+                            type="number"
+                            min="1"
+                            max="50"
+                            value={editSettings?.tier1Limit || 10}
+                            onChange={(e) => setEditSettings(prev => prev ? { ...prev, tier1Limit: parseInt(e.target.value) || 10 } : null)}
+                          />
+                        </label>
+                      </div>
+                      <div className="edit-setting">
+                        <label>
+                          Tier 2 Limit:
+                          <input
+                            type="number"
+                            min="1"
+                            max="50"
+                            value={editSettings?.tier2Limit || 6}
+                            onChange={(e) => setEditSettings(prev => prev ? { ...prev, tier2Limit: parseInt(e.target.value) || 6 } : null)}
+                          />
+                        </label>
+                      </div>
+                      <div className="edit-setting">
+                        <label>
+                          Tier 3 Limit:
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            value={editSettings?.tier3Limit || 3}
+                            onChange={(e) => setEditSettings(prev => prev ? { ...prev, tier3Limit: parseInt(e.target.value) || 3 } : null)}
+                            disabled={!editSettings?.includeAllFirms}
+                          />
+                        </label>
+                      </div>
+                      <div className="edit-setting">
+                        <label>
+                          Output Prefix:
+                          <input
+                            type="text"
+                            value={editSettings?.userPrefix || 'Combined-Contacts'}
+                            onChange={(e) => setEditSettings(prev => prev ? { ...prev, userPrefix: e.target.value } : null)}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    <div className="edit-actions">
+                      <button className="cancel-button" onClick={handleCancelEdit}>
+                        Cancel
+                      </button>
+                      <button className="save-button" onClick={handleSaveEdit}>
+                        Save Changes
+                      </button>
+                    </div>
                   </div>
-                  <div className="setting-item">
-                    <span className="setting-label">Find Emails:</span>
-                    <span className="setting-value">{preset.settings.findEmails ? 'Yes' : 'No'}</span>
-                  </div>
-                  <div className="setting-item">
-                    <span className="setting-label">Tier 1 Limit:</span>
-                    <span className="setting-value">{preset.settings.tier1Limit}</span>
-                  </div>
-                  <div className="setting-item">
-                    <span className="setting-label">Tier 2 Limit:</span>
-                    <span className="setting-value">{preset.settings.tier2Limit}</span>
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="preset-header">
+                      <div className="preset-name">{preset.name}</div>
+                      <div className="preset-actions">
+                        <button
+                          className="preset-edit"
+                          onClick={() => handleEditPreset(preset)}
+                          aria-label="Edit preset"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="preset-delete"
+                          onClick={() => handleDeletePreset(preset.id)}
+                          aria-label="Delete preset"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                    <div className="preset-settings">
+                      <div className="setting-item">
+                        <span className="setting-label">Include All Firms:</span>
+                        <span className="setting-value">{preset.settings.includeAllFirms ? 'Yes' : 'No'}</span>
+                      </div>
+                      <div className="setting-item">
+                        <span className="setting-label">Find Emails:</span>
+                        <span className="setting-value">{preset.settings.findEmails ? 'Yes' : 'No'}</span>
+                      </div>
+                      <div className="setting-item">
+                        <span className="setting-label">Firm Exclusion:</span>
+                        <span className="setting-value">{preset.settings.firmExclusion ? 'Yes' : 'No'}</span>
+                      </div>
+                      <div className="setting-item">
+                        <span className="setting-label">Contact Inclusion:</span>
+                        <span className="setting-value">{preset.settings.contactInclusion ? 'Yes' : 'No'}</span>
+                      </div>
+                      <div className="setting-item">
+                        <span className="setting-label">Tier 1 Limit:</span>
+                        <span className="setting-value">{preset.settings.tier1Limit}</span>
+                      </div>
+                      <div className="setting-item">
+                        <span className="setting-label">Tier 2 Limit:</span>
+                        <span className="setting-value">{preset.settings.tier2Limit}</span>
+                      </div>
+                      <div className="setting-item">
+                        <span className="setting-label">Tier 3 Limit:</span>
+                        <span className="setting-value">{preset.settings.tier3Limit}</span>
+                      </div>
+                      <div className="setting-item">
+                        <span className="setting-label">Output Prefix:</span>
+                        <span className="setting-value">{preset.settings.userPrefix}</span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>
