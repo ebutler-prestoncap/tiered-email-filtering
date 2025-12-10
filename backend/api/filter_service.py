@@ -88,6 +88,7 @@ class FilterService:
             # Call the main processing method
             # We need to replicate the process_contacts logic but extract analytics
             result = self._process_with_analytics(
+                settings=settings,
                 include_all_firms=include_all_firms,
                 user_prefix=user_prefix,
                 output_filename=output_filename
@@ -106,6 +107,7 @@ class FilterService:
     
     def _process_with_analytics(
         self,
+        settings: Dict[str, Any],
         include_all_firms: bool,
         user_prefix: str,
         output_filename: str
