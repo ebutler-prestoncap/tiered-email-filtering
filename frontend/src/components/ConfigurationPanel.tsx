@@ -98,6 +98,10 @@ export default function ConfigurationPanel({
           excludeKeywords: [],
           requireInvestmentTeam: false,
         },
+        firmExclusionList: '',
+        firmInclusionList: '',
+        contactExclusionList: '',
+        contactInclusionList: '',
       };
       onSettingsChange(fallbackSettings);
     }
