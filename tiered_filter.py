@@ -299,10 +299,26 @@ class TieredFilter:
         # Priority 1: Use existing NAME if available and not empty
         if 'NAME' in result_data:
             current_names = pd.Series(result_data['NAME'])
+            # Filter out invalid single-character values like "Y", "N", etc. that are likely boolean flags
             mask = (current_names != '') & (current_names != 'nan') & current_names.notna()
+            # Exclude single-character values that are likely not names (Y, N, etc.)
+            mask = mask & (current_names.astype(str).str.len() > 1)
             full_names[mask] = current_names[mask]
             priority1_count = mask.sum()
             logger.info(f"Used {priority1_count} existing NAME values")
+        
+        # Priority 1.5: Check for Full Name or Full_Name columns in original df if NAME is still empty
+        if 'Full Name' in df.columns or 'Full_Name' in df.columns:
+            full_name_col = 'Full Name' if 'Full Name' in df.columns else 'Full_Name'
+            full_name_values = df[full_name_col].fillna('').astype(str)
+            # Filter out invalid single-character values
+            valid_full_names = (full_name_values != '') & (full_name_values != 'nan') & (full_name_values.str.len() > 1)
+            empty_mask = (full_names == '') | (full_names == 'nan') | full_names.isna()
+            fill_mask = empty_mask & valid_full_names
+            if fill_mask.any():
+                full_names[fill_mask] = full_name_values[fill_mask]
+                priority1_5_count = fill_mask.sum()
+                logger.info(f"Used {priority1_5_count} names from '{full_name_col}' column")
         
         # Priority 2: Combine First Name + Last Name for remaining empty names
         if 'First Name' in df.columns and 'Last Name' in df.columns:
@@ -621,7 +637,7 @@ class TieredFilter:
         
         # Standard column mappings (source -> target)
         mappings = {
-            'NAME': ['NAME', 'name', 'Key Contact', 'contact name', 'contact_name'],
+            'NAME': ['NAME', 'name', 'Key Contact', 'contact name', 'contact_name', 'Full Name', 'Full_Name', 'full name', 'full_name'],
             'INVESTOR': ['INVESTOR', 'investor', 'Institution Name', 'institution_name', 'firm', 'company'],
             'JOB_TITLE': ['JOB TITLE', 'Job title', 'job_title', 'position'],  # Removed 'TITLE' since it contains salutations
             'EMAIL': ['EMAIL', 'email', 'Email', 'email address'],
@@ -681,6 +697,12 @@ class TieredFilter:
                 result_df[col] = result_df[col].apply(
                     lambda x: '' if str(x).lower().strip() in ['nan', 'none', 'null'] else str(x).strip()
                 )
+        
+        # Special handling for NAME column: filter out single-character values like "Y", "N" that are likely boolean flags
+        if 'NAME' in result_df.columns:
+            result_df['NAME'] = result_df['NAME'].apply(
+                lambda x: '' if len(str(x).strip()) <= 1 and str(x).strip().upper() in ['Y', 'N', 'T', 'F'] else str(x).strip()
+            )
         
         # Add default role if missing
         mask = result_df['ROLE'] == ''
@@ -885,10 +907,10 @@ class TieredFilter:
         return {
             'name': 'Tier 1 - Key Contacts',
             'description': 'Senior decision makers and key investment professionals',
-            'job_title_pattern': r'.*\b(cio|c\.i\.o\.|chief\s+investment\s+officers?t?|deputy\s+cio|head\s+of\s+investments?|head\s+of\s+research|head\s+of\s+private\s+markets?|managing\s+directors?|managing\s+partners?|executive\s+directors?|senior\s+portfolio\s+managers?|investment\s+directors?|portfolio\s+managers?|investment\s+managers?|fund\s+managers?|presidents?|vice\s+presidents?|senior\s+vice\s+presidents?|executive\s+vice\s+presidents?)\b',
+            'job_title_pattern': r'.*\b(cio|c\.i\.o\.|chief\s+investment\s+officers?t?|deputy\s+chief\s+investment\s+officer|deputy\s+cio|head\s+of\s+investments?|head\s+of\s+investment|head\s+of\s+alternatives?|head\s+of\s+alternative\s+investments?|head\s+of\s+private\s+markets?|head\s+of\s+private\s+equity|head\s+of\s+private\s+debt|head\s+of\s+private\s+credit|head\s+of\s+multi[- ]asset|head\s+of\s+hedge\s+funds?|head\s+of\s+hedge\s+fund\s+research|head\s+of\s+research|head\s+of\s+manager\s+research|head\s+of\s+manager\s+selection|investment\s+directors?|director\s+of\s+investments?|portfolio\s+managers?|fund\s+managers?|investment\s+managers?|investment\s+analyst|research\s+analyst|senior\s+investment\s+officer|investment\s+officer|investment\s+strategist|asset\s+allocation|multi[- ]manager|manager\s+research|due\s+diligence|managing\s+directors?|managing\s+partners?|executive\s+directors?|senior\s+portfolio\s+managers?|presidents?|vice\s+presidents?|senior\s+vice\s+presidents?|executive\s+vice\s+presidents?)\b',
             'exclusion_pattern': r'.*\b(operations?|hr|human\s+resources?|investor\s+relations?|client\s+relations?|marketing|sales|compliance|technology|administrator|assistant|secretary|receptionist|intern|trainee)\b',
             'require_investment_team': False,
-            'priority_keywords': ['cio', 'chief investment officer', 'managing director', 'managing partner', 'portfolio manager', 'fund manager', 'president', 'head of investments', 'head of research', 'head of private markets']
+            'priority_keywords': ['cio', 'chief investment officer', 'deputy chief investment officer', 'managing director', 'managing partner', 'portfolio manager', 'fund manager', 'president', 'head of investments', 'head of investment', 'head of alternatives', 'head of alternative investments', 'head of private markets', 'head of private equity', 'head of private debt', 'head of private credit', 'head of multi-asset', 'head of hedge funds', 'head of hedge fund research', 'head of research', 'head of manager research', 'head of manager selection', 'investment director', 'director of investments', 'investment analyst', 'research analyst', 'senior investment officer', 'investment officer', 'investment strategist', 'asset allocation', 'multi-manager', 'manager research', 'due diligence']
         }
     
     def create_tier2_config(self) -> Dict[str, Any]:
