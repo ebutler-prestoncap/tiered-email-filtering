@@ -1,5 +1,24 @@
 # Local Deployment Guide
 
+> **Recommended**: Use Docker for deployment. See [DOCKER.md](./DOCKER.md) for Docker setup.
+
+## Docker Deployment (Recommended)
+
+See [DOCKER.md](./DOCKER.md) for complete Docker deployment guide.
+
+Quick start:
+```bash
+docker compose up --build
+```
+
+Access at:
+- Frontend: http://localhost:3000
+- Backend: http://localhost:5000
+
+---
+
+## Manual Deployment (Alternative)
+
 ## Quick Start
 
 ### 1. Run Setup (One Time)

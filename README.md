@@ -2,7 +2,25 @@
 
 A professional contact filtering tool that processes Excel contact lists and organizes them into prioritized tiers for investment outreach.
 
-## 🚀 Quick Start
+## 🌐 Web Application
+
+**New!** A modern web application is now available with:
+- Interactive UI for file upload and configuration
+- Real-time processing with analytics dashboard
+- Processing history and settings presets
+- Docker deployment support
+
+**Quick Start (Docker - Recommended):**
+```bash
+docker compose up --build
+```
+Access at http://localhost:3000
+
+See [DOCKER.md](./DOCKER.md) for Docker deployment guide or [WEBAPP_README.md](./WEBAPP_README.md) for web app details.
+
+---
+
+## 🚀 CLI Quick Start
 
 1. **Install Requirements**:
    ```bash

@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tiered-filtering-backend
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount data directory for persistence
+      - ./backend/data:/app/data
+      - ./backend/uploads:/app/uploads
+      - ./backend/results:/app/results
+      # Mount code for development (hot reload)
+      - ./backend:/app
+      - ./tiered_filter.py:/app/../tiered_filter.py
+    environment:
+      - FLASK_DEBUG=true
+      - FLASK_ENV=development
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: tiered-filtering-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount code for development (hot reload)
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:5000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend_data:
+  backend_uploads:
+  backend_results:
+
