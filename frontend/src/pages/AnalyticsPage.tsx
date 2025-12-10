@@ -219,24 +219,28 @@ export default function AnalyticsPage() {
                 Export lists of contacts removed from each tier during filtering.
               </p>
               <div className="export-buttons">
-                <button
-                  className="export-button"
-                  onClick={() => handleExportDelta('tier1')}
-                >
-                  Export Tier 1 Removed
-                </button>
-                <button
-                  className="export-button"
-                  onClick={() => handleExportDelta('tier2')}
-                >
-                  Export Tier 2 Removed
-                </button>
-                {summary?.tier3_contacts > 0 && (
+                {getRemovedCount('Tier 1') > 0 && (
+                  <button
+                    className="export-button"
+                    onClick={() => handleExportDelta('tier1')}
+                  >
+                    Export Tier 1 Removed ({getRemovedCount('Tier 1')})
+                  </button>
+                )}
+                {getRemovedCount('Tier 2') > 0 && (
+                  <button
+                    className="export-button"
+                    onClick={() => handleExportDelta('tier2')}
+                  >
+                    Export Tier 2 Removed ({getRemovedCount('Tier 2')})
+                  </button>
+                )}
+                {getRemovedCount('Tier 3') > 0 && (
                   <button
                     className="export-button"
                     onClick={() => handleExportDelta('tier3')}
                   >
-                    Export Tier 3 Removed
+                    Export Tier 3 Removed ({getRemovedCount('Tier 3')})
                   </button>
                 )}
               </div>
