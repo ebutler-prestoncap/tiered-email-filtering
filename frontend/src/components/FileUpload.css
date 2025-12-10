@@ -47,6 +47,21 @@
   margin-top: var(--spacing-lg);
 }
 
+.uploaded-files-placeholder {
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-md);
+  text-align: center;
+  background-color: var(--color-surface);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--color-border);
+}
+
+.placeholder-text {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
 .uploaded-files h3 {
   font-size: 16px;
   font-weight: 600;

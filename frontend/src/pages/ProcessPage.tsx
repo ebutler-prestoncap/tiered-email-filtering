@@ -10,22 +10,22 @@ import './ProcessPage.css';
 export default function ProcessPage() {
   const navigate = useNavigate();
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [settings, setSettings] = useState<ProcessingSettings>({
-    includeAllFirms: false,
-    findEmails: false,
-    firmExclusion: false,
-    contactInclusion: false,
-    tier1Limit: 10,
-    tier2Limit: 6,
-    tier3Limit: 3,
-    userPrefix: 'Combined-Contacts',
-  });
+  const [settings, setSettings] = useState<ProcessingSettings | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
   const handleFilesSelected = (files: File[]) => {
-    setUploadedFiles(prev => [...prev, ...files]);
+    console.log('handleFilesSelected called with:', files.map(f => f.name));
+    setUploadedFiles(prev => {
+      // Avoid duplicates by checking file name and size
+      const newFiles = files.filter(newFile => 
+        !prev.some(existingFile => 
+          existingFile.name === newFile.name && existingFile.size === newFile.size
+        )
+      );
+      return [...prev, ...newFiles];
+    });
   };
 
   const handleRemoveFile = (index: number) => {
@@ -33,6 +33,10 @@ export default function ProcessPage() {
   };
 
   const handleProcess = async () => {
+    if (!settings) {
+      alert('Please wait for configuration to load');
+      return;
+    }
     if (uploadedFiles.length === 0) {
       alert('Please upload at least one Excel file');
       return;
@@ -111,12 +115,18 @@ export default function ProcessPage() {
         </div>
 
         <div className="process-right">
-          <ConfigurationPanel
-            settings={settings}
-            onSettingsChange={setSettings}
-            onProcess={handleProcess}
-            isProcessing={isProcessing}
-          />
+          {settings ? (
+            <ConfigurationPanel
+              settings={settings}
+              onSettingsChange={setSettings}
+              onProcess={handleProcess}
+              isProcessing={isProcessing}
+            />
+          ) : (
+            <div className="config-panel">
+              <p>Loading configuration...</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -35,8 +35,18 @@ export default function FileUpload({ onFilesSelected, uploadedFiles, onRemoveFil
 
   const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      onFilesSelected(files);
+    const validFiles = files.filter(
+      file => file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
+    );
+    
+    if (validFiles.length > 0) {
+      console.log('Files selected:', validFiles.map(f => f.name));
+      onFilesSelected(validFiles);
+      // Reset input to allow selecting the same file again
+      e.target.value = '';
+    } else if (files.length > 0) {
+      alert('Please select Excel files (.xlsx or .xls)');
+      e.target.value = '';
     }
   }, [onFilesSelected]);
 
@@ -73,12 +83,12 @@ export default function FileUpload({ onFilesSelected, uploadedFiles, onRemoveFil
         </label>
       </div>
 
-      {uploadedFiles.length > 0 && (
+      {uploadedFiles.length > 0 ? (
         <div className="uploaded-files">
           <h3>Uploaded Files ({uploadedFiles.length})</h3>
           <div className="file-list">
             {uploadedFiles.map((file, index) => (
-              <div key={index} className="file-item">
+              <div key={`${file.name}-${index}`} className="file-item">
                 <span className="file-name">{file.name}</span>
                 <span className="file-size">{formatFileSize(file.size)}</span>
                 <button
@@ -91,6 +101,10 @@ export default function FileUpload({ onFilesSelected, uploadedFiles, onRemoveFil
               </div>
             ))}
           </div>
+        </div>
+      ) : (
+        <div className="uploaded-files-placeholder">
+          <p className="placeholder-text">No files uploaded yet</p>
         </div>
       )}
     </div>
