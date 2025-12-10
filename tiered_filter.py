@@ -1094,8 +1094,14 @@ class TieredFilter:
                           file_info: List[Dict], dedup_count: int, 
                           output_filename: str, deduplicated_df: pd.DataFrame = None, 
                           delta_df: pd.DataFrame = None, excluded_firms_analysis: Dict = None,
-                          rescued_df: pd.DataFrame = None, rescue_stats: Dict = None) -> str:
-        """Create comprehensive output Excel file"""
+                          rescued_df: pd.DataFrame = None, rescue_stats: Dict = None,
+                          contact_lists_only: bool = False) -> str:
+        """Create output Excel file with contact lists and optionally analytics sheets
+        
+        Args:
+            contact_lists_only: If True, only write contact list sheets (Tier1, Tier2, Tier3).
+                              If False, include all analytics sheets (default behavior for CLI).
+        """
         
         output_path = self.output_folder / output_filename
         
@@ -1136,22 +1142,24 @@ class TieredFilter:
                     rescued_reordered = rescued_df
                 rescued_reordered.to_excel(writer, sheet_name='Tier3_Rescued_Contacts', index=False)
             
-            # Processing summary
-            total_raw = sum(info['contacts'] for info in file_info)
+            # Only write analytics sheets if contact_lists_only is False
+            if not contact_lists_only:
+                # Processing summary
+                total_raw = sum(info['contacts'] for info in file_info)
             
-            # Calculate firm/institution counts and statistics
-            raw_firms = set()
-            for info in file_info:
+                # Calculate firm/institution counts and statistics
+                raw_firms = set()
+                for info in file_info:
                 # Estimate firms from file info if available
                 if 'firms' in info:
                     raw_firms.update(info['firms'])
             
-            # Calculate unique firms after deduplication
-            unique_firms_after_dedup = 0
-            avg_contacts_per_firm_before = 0
-            median_contacts_per_firm_before = 0
+                # Calculate unique firms after deduplication
+                unique_firms_after_dedup = 0
+                avg_contacts_per_firm_before = 0
+                median_contacts_per_firm_before = 0
             
-            if deduplicated_df is not None and 'INVESTOR' in deduplicated_df.columns and len(deduplicated_df) > 0:
+                if deduplicated_df is not None and 'INVESTOR' in deduplicated_df.columns and len(deduplicated_df) > 0:
                 unique_firms_after_dedup = deduplicated_df['INVESTOR'].nunique()
                 
                 # Calculate average and median contacts per firm before filtering
@@ -1159,52 +1167,52 @@ class TieredFilter:
                 avg_contacts_per_firm_before = firm_contact_counts_before.mean()
                 median_contacts_per_firm_before = firm_contact_counts_before.median()
             
-            # Calculate tier-specific firm counts and statistics
-            tier1_firms = tier1_df['INVESTOR'].nunique() if 'INVESTOR' in tier1_df.columns and len(tier1_df) > 0 else 0
-            tier2_firms = tier2_df['INVESTOR'].nunique() if 'INVESTOR' in tier2_df.columns and len(tier2_df) > 0 else 0
+                # Calculate tier-specific firm counts and statistics
+                tier1_firms = tier1_df['INVESTOR'].nunique() if 'INVESTOR' in tier1_df.columns and len(tier1_df) > 0 else 0
+                tier2_firms = tier2_df['INVESTOR'].nunique() if 'INVESTOR' in tier2_df.columns and len(tier2_df) > 0 else 0
             
-            # Calculate tier-specific averages and medians
-            avg_contacts_per_firm_tier1 = 0
-            median_contacts_per_firm_tier1 = 0
-            avg_contacts_per_firm_tier2 = 0
-            median_contacts_per_firm_tier2 = 0
+                # Calculate tier-specific averages and medians
+                avg_contacts_per_firm_tier1 = 0
+                median_contacts_per_firm_tier1 = 0
+                avg_contacts_per_firm_tier2 = 0
+                median_contacts_per_firm_tier2 = 0
             
-            if len(tier1_df) > 0 and 'INVESTOR' in tier1_df.columns:
+                if len(tier1_df) > 0 and 'INVESTOR' in tier1_df.columns:
                 tier1_firm_counts = tier1_df['INVESTOR'].value_counts()
                 avg_contacts_per_firm_tier1 = tier1_firm_counts.mean()
                 median_contacts_per_firm_tier1 = tier1_firm_counts.median()
             
-            if len(tier2_df) > 0 and 'INVESTOR' in tier2_df.columns:
+                if len(tier2_df) > 0 and 'INVESTOR' in tier2_df.columns:
                 tier2_firm_counts = tier2_df['INVESTOR'].value_counts()
                 avg_contacts_per_firm_tier2 = tier2_firm_counts.mean()
                 median_contacts_per_firm_tier2 = tier2_firm_counts.median()
             
-            # Calculate unique firms across both tiers (avoiding double counting)
-            if len(tier1_df) > 0 and len(tier2_df) > 0 and 'INVESTOR' in tier1_df.columns and 'INVESTOR' in tier2_df.columns:
+                # Calculate unique firms across both tiers (avoiding double counting)
+                if len(tier1_df) > 0 and len(tier2_df) > 0 and 'INVESTOR' in tier1_df.columns and 'INVESTOR' in tier2_df.columns:
                 all_tier_firms = set(tier1_df['INVESTOR'].dropna().unique()) | set(tier2_df['INVESTOR'].dropna().unique())
                 total_firms_filtered = len(all_tier_firms)
-            else:
+                else:
                 total_firms_filtered = tier1_firms + tier2_firms
             
-            # Calculate firm exclusion statistics
-            firms_excluded_count = 0
-            contacts_excluded_count = 0
-            if self.enable_firm_exclusion and hasattr(self, 'excluded_firms'):
+                # Calculate firm exclusion statistics
+                firms_excluded_count = 0
+                contacts_excluded_count = 0
+                if self.enable_firm_exclusion and hasattr(self, 'excluded_firms'):
                 firms_excluded_count = len(self.excluded_firms)
                 # Calculate contacts excluded: difference between before and after exclusion
                 if hasattr(self, 'pre_exclusion_count'):
                     contacts_excluded_count = self.pre_exclusion_count - len(deduplicated_df) if deduplicated_df is not None else 0
             
-            # Calculate contact inclusion statistics
-            contacts_included_count = 0
-            contacts_forced_included = 0
-            if self.enable_contact_inclusion and hasattr(self, 'included_contacts'):
+                # Calculate contact inclusion statistics
+                contacts_included_count = 0
+                contacts_forced_included = 0
+                if self.enable_contact_inclusion and hasattr(self, 'included_contacts'):
                 contacts_included_count = len(self.included_contacts)
                 # This would need to be tracked during inclusion process
                 # For now, we'll calculate based on whether contacts were found
                 contacts_forced_included = getattr(self, 'contacts_forced_included', 0)
             
-            summary_data = {
+                summary_data = {
                 'Step': [
                     '📁 Input Files',
                     '📊 Total Raw Contacts',
@@ -1281,17 +1289,17 @@ class TieredFilter:
                     '—',
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 ]
-            }
+                }
             
-            summary_df = pd.DataFrame(summary_data)
-            summary_df.to_excel(writer, sheet_name='Processing_Summary', index=False)
+                summary_df = pd.DataFrame(summary_data)
+                summary_df.to_excel(writer, sheet_name='Processing_Summary', index=False)
             
-            # Input file details
-            file_details_df = pd.DataFrame(file_info)
-            file_details_df.to_excel(writer, sheet_name='Input_File_Details', index=False)
+                # Input file details
+                file_details_df = pd.DataFrame(file_info)
+                file_details_df.to_excel(writer, sheet_name='Input_File_Details', index=False)
             
-            # Delta analysis (if provided)
-            if delta_df is not None:
+                # Delta analysis (if provided)
+                if delta_df is not None:
                 delta_df.to_excel(writer, sheet_name='Delta_Analysis', index=False)
                 
                 # Create delta summary
@@ -1306,8 +1314,8 @@ class TieredFilter:
                     filter_breakdown.columns = ['Filter Reason', 'Count']
                     filter_breakdown.to_excel(writer, sheet_name='Filter_Breakdown', index=False)
             
-            # Excluded firms analysis (if provided)
-            if excluded_firms_analysis is not None:
+                # Excluded firms analysis (if provided)
+                if excluded_firms_analysis is not None:
                 # Excluded firms summary
                 excluded_summary_data = {
                     'Metric': [
