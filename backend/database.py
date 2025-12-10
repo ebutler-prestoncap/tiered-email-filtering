@@ -72,10 +72,24 @@ class Database:
             )
         """)
         
+        # Uploaded files table - stores file metadata for reuse
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS uploaded_files (
+                id TEXT PRIMARY KEY,
+                original_name TEXT NOT NULL,
+                stored_path TEXT NOT NULL,
+                file_size INTEGER,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used_at TIMESTAMP
+            )
+        """)
+        
         # Create indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_presets_default ON settings_presets(is_default)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_uploaded_files_uploaded_at ON uploaded_files(uploaded_at)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_uploaded_files_last_used ON uploaded_files(last_used_at)")
         
         conn.commit()
         conn.close()
@@ -377,6 +391,80 @@ class Database:
             return False
         
         cursor.execute("DELETE FROM settings_presets WHERE id = ?", (preset_id,))
+        deleted = cursor.rowcount > 0
+        
+        conn.commit()
+        conn.close()
+        return deleted
+    
+    def save_uploaded_file(self, file_id: str, original_name: str, stored_path: str, file_size: int) -> None:
+        """Save uploaded file metadata"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO uploaded_files (id, original_name, stored_path, file_size)
+            VALUES (?, ?, ?, ?)
+        """, (file_id, original_name, stored_path, file_size))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_uploaded_file(self, file_id: str) -> Optional[Dict]:
+        """Get uploaded file metadata"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM uploaded_files WHERE id = ?", (file_id,))
+        row = cursor.fetchone()
+        
+        conn.close()
+        if row:
+            return dict(row)
+        return None
+    
+    def list_uploaded_files(self, limit: int = 100) -> List[Dict]:
+        """List all uploaded files, most recent first"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, original_name, stored_path, file_size, uploaded_at, last_used_at
+            FROM uploaded_files
+            ORDER BY uploaded_at DESC
+            LIMIT ?
+        """, (limit,))
+        
+        files = []
+        for row in cursor.fetchall():
+            file_dict = dict(row)
+            # Check if file still exists
+            if Path(file_dict["stored_path"]).exists():
+                files.append(file_dict)
+        
+        conn.close()
+        return files
+    
+    def update_file_last_used(self, file_id: str) -> None:
+        """Update last_used_at timestamp for a file"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE uploaded_files 
+            SET last_used_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        """, (file_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    def delete_uploaded_file(self, file_id: str) -> bool:
+        """Delete uploaded file record"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("DELETE FROM uploaded_files WHERE id = ?", (file_id,))
         deleted = cursor.rowcount > 0
         
         conn.commit()

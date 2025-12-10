@@ -13,7 +13,7 @@ const api = axios.create({
   },
 });
 
-export const uploadFiles = async (files: File[]): Promise<{ files: string[]; paths: string[] }> => {
+export const uploadFiles = async (files: File[]): Promise<{ files: string[]; paths: string[]; fileIds: string[] }> => {
   const formData = new FormData();
   files.forEach(file => {
     formData.append('files', file);
@@ -30,11 +30,13 @@ export const uploadFiles = async (files: File[]): Promise<{ files: string[]; pat
 
 export const processContacts = async (
   files: string[],
-  settings: ProcessingSettings
+  settings: ProcessingSettings,
+  fileIds?: string[]
 ): Promise<{ jobId: string; status: string }> => {
   const response = await api.post<{ success: boolean; jobId: string; status: string }>('/process', {
     files,
     settings,
+    fileIds,
   });
 
   if (!response.data.success) {
@@ -129,5 +131,26 @@ export const deletePreset = async (presetId: string): Promise<void> => {
   if (!response.data.success) {
     throw new Error('Failed to delete preset');
   }
+};
+
+export interface UploadedFile {
+  id: string;
+  originalName: string;
+  storedPath: string;
+  fileSize: number;
+  uploadedAt: string;
+  lastUsedAt: string | null;
+}
+
+export const listUploadedFiles = async (limit: number = 100): Promise<UploadedFile[]> => {
+  const response = await api.get<{ success: boolean; files: UploadedFile[] }>('/files', {
+    params: { limit },
+  });
+  
+  if (!response.data.success) {
+    throw new Error('Failed to list uploaded files');
+  }
+  
+  return response.data.files;
 };
 

@@ -1,0 +1,124 @@
+.previous-files-selector {
+  margin-bottom: var(--spacing-lg);
+}
+
+.selector-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--transition);
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.selector-toggle:hover {
+  border-color: var(--color-accent);
+  background-color: rgba(0, 113, 227, 0.05);
+}
+
+.selector-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.selector-label {
+  flex: 1;
+  text-align: left;
+  font-weight: 500;
+}
+
+.selected-count {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.selector-arrow {
+  font-size: 12px;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.selector-arrow.open {
+  transform: rotate(180deg);
+}
+
+.selector-dropdown {
+  margin-top: var(--spacing-sm);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  max-height: 400px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.selector-loading,
+.selector-empty {
+  padding: var(--spacing-lg);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.selector-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.selector-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  cursor: pointer;
+  transition: var(--transition);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.selector-item:last-child {
+  border-bottom: none;
+}
+
+.selector-item:hover {
+  background-color: rgba(0, 113, 227, 0.05);
+}
+
+.selector-checkbox {
+  margin-top: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+}
+
+.selector-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.selector-item-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+  margin-bottom: var(--spacing-xs);
+  word-break: break-word;
+}
+
+.selector-item-meta {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.selector-item-separator {
+  opacity: 0.5;
+}
+

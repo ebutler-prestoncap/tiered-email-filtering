@@ -72,10 +72,22 @@ def upload_files():
     """Upload Excel files"""
     try:
         saved_paths, original_names = save_uploaded_files(request, UPLOAD_FOLDER)
+        
+        # Save file metadata to database
+        import uuid
+        import os
+        file_ids = []
+        for i, (path, original_name) in enumerate(zip(saved_paths, original_names)):
+            file_id = str(uuid.uuid4())
+            file_size = os.path.getsize(path) if os.path.exists(path) else 0
+            db.save_uploaded_file(file_id, original_name, path, file_size)
+            file_ids.append(file_id)
+        
         return jsonify({
             "success": True,
             "files": original_names,
-            "paths": saved_paths
+            "paths": saved_paths,
+            "fileIds": file_ids
         }), 200
     except Exception as e:
         logger.error(f"Upload error: {e}")
@@ -86,34 +98,67 @@ def process_contacts():
     """Start processing job"""
     try:
         data = request.json
-        files = data.get("files", [])
+        files = data.get("files", [])  # Can be file paths
+        file_ids = data.get("fileIds", [])  # Optional: file IDs from database
         settings = data.get("settings", {})
         
-        if not files:
+        if not files and not file_ids:
             return jsonify({"success": False, "error": "No files provided"}), 400
         
-        # Create job
-        job_id = db.create_job(settings, files)
-        
         # Get full paths for uploaded files
-        # Files array should contain the paths returned from upload endpoint (UUID filenames)
         uploaded_files = []
+        original_filenames = []
+        all_file_names = []  # For job creation
+        
+        # Process file IDs first (previously uploaded files)
+        if file_ids:
+            for file_id in file_ids:
+                file_meta = db.get_uploaded_file(file_id)
+                if file_meta and Path(file_meta["stored_path"]).exists():
+                    uploaded_files.append(file_meta["stored_path"])
+                    original_filenames.append(file_meta["original_name"])
+                    all_file_names.append(file_meta["original_name"])
+                    # Update last used timestamp
+                    db.update_file_last_used(file_id)
+                else:
+                    raise ValueError(f"File ID not found or file missing: {file_id}")
+        
+        # Process new file paths
         for f in files:
+            if not f or f.strip() == '':  # Skip empty placeholders for file IDs
+                continue
+                
+            file_path = None
+            original_name = None
+            
             # Check if it's already a full path
             if Path(f).is_absolute() and Path(f).exists():
-                uploaded_files.append(str(Path(f)))
+                file_path = str(Path(f))
+                original_name = Path(f).name
             else:
                 # Assume it's a filename in the upload folder
-                file_path = UPLOAD_FOLDER / Path(f).name
-                if file_path.exists():
-                    uploaded_files.append(str(file_path))
+                file_path_obj = UPLOAD_FOLDER / Path(f).name
+                if file_path_obj.exists():
+                    file_path = str(file_path_obj)
+                    original_name = Path(f).name
                 else:
-                    raise ValueError(f"Could not find uploaded file: {f} (checked {file_path})")
+                    raise ValueError(f"Could not find uploaded file: {f} (checked {file_path_obj})")
+            
+            if file_path:
+                uploaded_files.append(file_path)
+                original_filenames.append(original_name or Path(file_path).name)
+                all_file_names.append(original_name or Path(file_path).name)
+        
+        if not uploaded_files:
+            return jsonify({"success": False, "error": "No valid files found"}), 400
+        
+        # Create job - store original file names for display
+        job_id = db.create_job(settings, all_file_names)
         
         # Start background processing
         thread = threading.Thread(
             target=process_job_async,
-            args=(job_id, uploaded_files, files, settings)
+            args=(job_id, uploaded_files, original_filenames, settings)
         )
         thread.daemon = True
         thread.start()
@@ -302,6 +347,31 @@ def delete_preset(preset_id: str):
             return jsonify({"success": False, "error": "Could not delete preset (may be default)"}), 400
     except Exception as e:
         logger.error(f"Delete preset error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/files', methods=['GET'])
+def list_uploaded_files():
+    """List all previously uploaded files"""
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        files = db.list_uploaded_files(limit)
+        
+        return jsonify({
+            "success": True,
+            "files": [
+                {
+                    "id": f["id"],
+                    "originalName": f["original_name"],
+                    "storedPath": f["stored_path"],
+                    "fileSize": f["file_size"],
+                    "uploadedAt": f["uploaded_at"],
+                    "lastUsedAt": f["last_used_at"]
+                }
+                for f in files
+            ]
+        }), 200
+    except Exception as e:
+        logger.error(f"List files error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/health', methods=['GET'])

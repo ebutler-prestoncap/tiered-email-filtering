@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FileUpload from '../components/FileUpload';
 import ConfigurationPanel from '../components/ConfigurationPanel';
-import ProcessingStatus from '../components/ProcessingStatus';
+import ProcessingSidePanel from '../components/ProcessingSidePanel';
+import PreviousFilesSelector from '../components/PreviousFilesSelector';
 import { uploadFiles, processContacts } from '../services/api';
 import type { ProcessingSettings } from '../types';
 import './ProcessPage.css';
@@ -10,6 +11,8 @@ import './ProcessPage.css';
 export default function ProcessPage() {
   const navigate = useNavigate();
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [selectedPreviousFileIds, setSelectedPreviousFileIds] = useState<string[]>([]);
+  const [showProcessingPanel, setShowProcessingPanel] = useState(false);
   // Initialize with default values - ConfigurationPanel will update with preset
   const [settings, setSettings] = useState<ProcessingSettings>({
     includeAllFirms: false,
@@ -62,20 +65,35 @@ export default function ProcessPage() {
   };
 
   const handleProcess = async () => {
-    if (uploadedFiles.length === 0) {
-      alert('Please upload at least one Excel file');
+    if (uploadedFiles.length === 0 && selectedPreviousFileIds.length === 0) {
+      alert('Please upload at least one Excel file or select previously uploaded files');
       return;
     }
 
     setIsProcessing(true);
     setProcessingStatus('pending');
+    setShowProcessingPanel(true);
 
     try {
-      // Upload files
-      const uploadResult = await uploadFiles(uploadedFiles);
+      let filePaths: string[] = [];
+      let fileIds: string[] = [];
       
-      // Start processing - use paths (UUID filenames) not original names
-      const processResult = await processContacts(uploadResult.paths || uploadResult.files, settings);
+      // Upload new files if any
+      if (uploadedFiles.length > 0) {
+        const uploadResult = await uploadFiles(uploadedFiles);
+        filePaths = uploadResult.paths || uploadResult.files;
+        fileIds = uploadResult.fileIds || [];
+      }
+      
+      // Combine new file IDs with previously selected file IDs
+      const allFileIds = [...fileIds, ...selectedPreviousFileIds];
+      
+      // Start processing - pass filePaths for new files and fileIds for all files
+      const processResult = await processContacts(
+        filePaths, 
+        settings, 
+        allFileIds.length > 0 ? allFileIds : undefined
+      );
       
       setCurrentJobId(processResult.jobId);
       setProcessingStatus('processing');
@@ -128,10 +146,20 @@ export default function ProcessPage() {
         Upload Excel files and configure filtering options to process your contact lists.
       </p>
 
-      <ProcessingStatus status={processingStatus} jobId={currentJobId} />
+      {showProcessingPanel && (
+        <ProcessingSidePanel
+          status={processingStatus}
+          jobId={currentJobId}
+          onClose={() => setShowProcessingPanel(false)}
+        />
+      )}
 
       <div className="process-layout">
         <div className="process-left">
+          <PreviousFilesSelector
+            selectedFileIds={selectedPreviousFileIds}
+            onSelectionChange={setSelectedPreviousFileIds}
+          />
           <FileUpload
             onFilesSelected={handleFilesSelected}
             uploadedFiles={uploadedFiles}
