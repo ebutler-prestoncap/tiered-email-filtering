@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { ProcessingSettings, SettingsPreset, TierFilterConfig } from '../types';
 import { getPresets, createPreset, updatePreset } from '../services/api';
 import TierFilterConfigComponent from './TierFilterConfig';
+import ListInput from './ListInput';
 import './ConfigurationPanel.css';
 
 interface ConfigurationPanelProps {
@@ -63,6 +64,10 @@ export default function ConfigurationPanel({
             excludeKeywords: [],
             requireInvestmentTeam: false,
           },
+          firmExclusionList: '',
+          firmInclusionList: '',
+          contactExclusionList: '',
+          contactInclusionList: '',
         };
         onSettingsChange(fallbackSettings);
       }
@@ -230,7 +235,52 @@ export default function ConfigurationPanel({
             />
             <span>Contact Inclusion</span>
           </label>
-          <p className="config-hint">Force specific contacts through filters (requires contact inclusion CSV)</p>
+          <p className="config-hint">Force specific contacts through filters</p>
+        </div>
+      </div>
+
+      {/* Firm and Contact Lists */}
+      <div className="config-group">
+        <h3 className="config-group-title">Firm & Contact Lists</h3>
+        
+        <div className="config-section">
+          <ListInput
+            label="Firm Exclusion List"
+            value={settings.firmExclusionList || ''}
+            onChange={(value) => updateSetting('firmExclusionList', value)}
+            placeholder="Enter firm names to exclude, one per line&#10;Example:&#10;Blackstone&#10;Goldman Sachs"
+            hint="One firm name per line. These firms will be excluded from all tiers."
+          />
+        </div>
+
+        <div className="config-section">
+          <ListInput
+            label="Firm Inclusion List"
+            value={settings.firmInclusionList || ''}
+            onChange={(value) => updateSetting('firmInclusionList', value)}
+            placeholder="Enter firm names to include, one per line&#10;Example:&#10;Blackstone&#10;Goldman Sachs"
+            hint="One firm name per line. Only these firms will be processed (if specified)."
+          />
+        </div>
+
+        <div className="config-section">
+          <ListInput
+            label="Contact Exclusion List"
+            value={settings.contactExclusionList || ''}
+            onChange={(value) => updateSetting('contactExclusionList', value)}
+            placeholder="Enter contacts to exclude, one per line&#10;Format: Name|Firm or Name, Firm&#10;Example:&#10;John Doe|Blackstone&#10;Jane Smith, Goldman Sachs"
+            hint="Format: Name|Firm or Name, Firm (one per line). These contacts will be excluded."
+          />
+        </div>
+
+        <div className="config-section">
+          <ListInput
+            label="Contact Inclusion List"
+            value={settings.contactInclusionList || ''}
+            onChange={(value) => updateSetting('contactInclusionList', value)}
+            placeholder="Enter contacts to include, one per line&#10;Format: Name|Firm or Name, Firm&#10;Example:&#10;John Doe|Blackstone&#10;Jane Smith, Goldman Sachs"
+            hint="Format: Name|Firm or Name, Firm (one per line). These contacts will be forced through filters."
+          />
         </div>
       </div>
 

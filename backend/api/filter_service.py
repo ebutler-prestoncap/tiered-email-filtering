@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
+import pandas as pd
 
 # Add parent directory to path to import tiered_filter
 project_root = Path(__file__).parent.parent.parent
@@ -70,11 +71,32 @@ class FilterService:
         
         try:
             # Load exclusion/inclusion lists if enabled
+            # First check for inline lists from settings, then fall back to CSV files
             if self.filter.enable_firm_exclusion:
-                self.filter.load_firm_exclusion_list()
+                # Check for inline exclusion list
+                firm_exclusion_list = settings.get("firmExclusionList", "")
+                if firm_exclusion_list and firm_exclusion_list.strip():
+                    self._load_firm_exclusion_from_string(firm_exclusion_list)
+                else:
+                    self.filter.load_firm_exclusion_list()
             
             if self.filter.enable_contact_inclusion:
-                self.filter.load_contact_inclusion_list()
+                # Check for inline inclusion list
+                contact_inclusion_list = settings.get("contactInclusionList", "")
+                if contact_inclusion_list and contact_inclusion_list.strip():
+                    self._load_contact_inclusion_from_string(contact_inclusion_list)
+                else:
+                    self.filter.load_contact_inclusion_list()
+            
+            # Handle firm inclusion (new feature)
+            firm_inclusion_list = settings.get("firmInclusionList", "")
+            if firm_inclusion_list and firm_inclusion_list.strip():
+                self._load_firm_inclusion_from_string(firm_inclusion_list)
+            
+            # Handle contact exclusion (new feature)
+            contact_exclusion_list = settings.get("contactExclusionList", "")
+            if contact_exclusion_list and contact_exclusion_list.strip():
+                self._load_contact_exclusion_from_string(contact_exclusion_list)
             
             # Process contacts
             include_all_firms = settings.get("includeAllFirms", False)
@@ -105,6 +127,98 @@ class FilterService:
             except Exception as e:
                 logger.warning(f"Could not cleanup temp folder: {e}")
     
+    def _load_firm_exclusion_from_string(self, firm_list: str) -> None:
+        """Load firm exclusion list from newline-separated string"""
+        excluded_firms = set()
+        excluded_firms_normalized = set()
+        
+        for line in firm_list.split('\n'):
+            firm_name = line.strip()
+            if firm_name:
+                normalized_name = firm_name.lower().strip()
+                excluded_firms_normalized.add(normalized_name)
+                excluded_firms.add(firm_name.strip())
+        
+        self.filter.excluded_firms = excluded_firms
+        self.filter.excluded_firms_normalized = excluded_firms_normalized
+        logger.info(f"Loaded {len(excluded_firms)} firms from inline exclusion list")
+    
+    def _load_firm_inclusion_from_string(self, firm_list: str) -> None:
+        """Load firm inclusion list from newline-separated string"""
+        if not hasattr(self.filter, 'included_firms'):
+            self.filter.included_firms = set()
+            self.filter.included_firms_normalized = set()
+        
+        for line in firm_list.split('\n'):
+            firm_name = line.strip()
+            if firm_name:
+                normalized_name = firm_name.lower().strip()
+                self.filter.included_firms_normalized.add(normalized_name)
+                self.filter.included_firms.add(firm_name.strip())
+        
+        logger.info(f"Loaded {len(self.filter.included_firms)} firms from inline inclusion list")
+    
+    def _load_contact_inclusion_from_string(self, contact_list: str) -> None:
+        """Load contact inclusion list from string (format: Name|Firm, newline-separated)"""
+        included_contacts = set()
+        included_contacts_normalized = set()
+        
+        for line in contact_list.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Parse format: Name|Firm or Name, Firm
+            if '|' in line:
+                parts = line.split('|', 1)
+            elif ',' in line:
+                parts = line.split(',', 1)
+            else:
+                continue  # Skip invalid format
+            
+            if len(parts) == 2:
+                full_name = parts[0].strip()
+                firm_name = parts[1].strip()
+                if full_name and firm_name:
+                    normalized_name = full_name.lower().strip()
+                    normalized_firm = firm_name.lower().strip()
+                    included_contacts_normalized.add((normalized_name, normalized_firm))
+                    included_contacts.add((full_name, firm_name))
+        
+        self.filter.included_contacts = included_contacts
+        self.filter.included_contacts_normalized = included_contacts_normalized
+        logger.info(f"Loaded {len(included_contacts)} contacts from inline inclusion list")
+    
+    def _load_contact_exclusion_from_string(self, contact_list: str) -> None:
+        """Load contact exclusion list from string (format: Name|Firm, newline-separated)"""
+        if not hasattr(self.filter, 'excluded_contacts'):
+            self.filter.excluded_contacts = set()
+            self.filter.excluded_contacts_normalized = set()
+        
+        for line in contact_list.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Parse format: Name|Firm or Name, Firm
+            if '|' in line:
+                parts = line.split('|', 1)
+            elif ',' in line:
+                parts = line.split(',', 1)
+            else:
+                continue  # Skip invalid format
+            
+            if len(parts) == 2:
+                full_name = parts[0].strip()
+                firm_name = parts[1].strip()
+                if full_name and firm_name:
+                    normalized_name = full_name.lower().strip()
+                    normalized_firm = firm_name.lower().strip()
+                    self.filter.excluded_contacts_normalized.add((normalized_name, normalized_firm))
+                    self.filter.excluded_contacts.add((full_name, firm_name))
+        
+        logger.info(f"Loaded {len(self.filter.excluded_contacts)} contacts from inline exclusion list")
+    
     def _process_with_analytics(
         self,
         settings: Dict[str, Any],
@@ -130,6 +244,34 @@ class FilterService:
         if self.filter.enable_firm_exclusion:
             self.filter.pre_exclusion_count = len(deduplicated_df)
             deduplicated_df = self.filter.apply_firm_exclusion(deduplicated_df)
+        
+        # Apply firm inclusion (only include firms in the list)
+        if hasattr(self.filter, 'included_firms_normalized') and self.filter.included_firms_normalized:
+            logger.info(f"Applying firm inclusion to {len(deduplicated_df)} contacts")
+            if 'INVESTOR' in deduplicated_df.columns:
+                def is_firm_included(firm_name):
+                    if pd.isna(firm_name) or firm_name == '':
+                        return False
+                    normalized_firm = str(firm_name).lower().strip()
+                    return normalized_firm in self.filter.included_firms_normalized
+                
+                mask = deduplicated_df['INVESTOR'].apply(is_firm_included)
+                deduplicated_df = deduplicated_df[mask].copy()
+                logger.info(f"After firm inclusion: {len(deduplicated_df)} contacts remain")
+        
+        # Apply contact exclusion (remove specific contacts)
+        if hasattr(self.filter, 'excluded_contacts_normalized') and self.filter.excluded_contacts_normalized:
+            logger.info(f"Applying contact exclusion to {len(deduplicated_df)} contacts")
+            if 'NAME' in deduplicated_df.columns and 'INVESTOR' in deduplicated_df.columns:
+                def is_contact_excluded(row):
+                    name = str(row.get('NAME', '')).lower().strip()
+                    firm = str(row.get('INVESTOR', '')).lower().strip()
+                    return (name, firm) in self.filter.excluded_contacts_normalized
+                
+                mask = ~deduplicated_df.apply(is_contact_excluded, axis=1)
+                excluded_count = len(deduplicated_df) - len(deduplicated_df[mask])
+                deduplicated_df = deduplicated_df[mask].copy()
+                logger.info(f"Excluded {excluded_count} contacts from exclusion list")
         
         # Apply tier filtering - use custom configs if provided, otherwise defaults
         tier1_filters = settings.get("tier1Filters")

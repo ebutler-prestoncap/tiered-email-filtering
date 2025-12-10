@@ -1307,12 +1307,7 @@ class TieredFilter:
                     delta_summary.columns = ['Status', 'Count']
                     delta_summary.to_excel(writer, sheet_name='Delta_Summary', index=False)
                     
-                    # Create filter reason breakdown for removed contacts
-                    removed_df = delta_df[delta_df['PROCESSING_STATUS'] == 'Removed']
-                    if len(removed_df) > 0:
-                        filter_breakdown = removed_df['FILTER_REASON'].value_counts().reset_index()
-                        filter_breakdown.columns = ['Filter Reason', 'Count']
-                        filter_breakdown.to_excel(writer, sheet_name='Filter_Breakdown', index=False)
+                    # Filter breakdown removed - no longer output to Excel
                 
                 # Excluded firms analysis (if provided)
                 if excluded_firms_analysis is not None:

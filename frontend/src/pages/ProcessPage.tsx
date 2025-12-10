@@ -35,6 +35,10 @@ export default function ProcessPage() {
       excludeKeywords: [],
       requireInvestmentTeam: false,
     },
+    firmExclusionList: '',
+    firmInclusionList: '',
+    contactExclusionList: '',
+    contactInclusionList: '',
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | null>(null);

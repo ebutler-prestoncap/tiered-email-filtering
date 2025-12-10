@@ -20,6 +20,10 @@ export interface ProcessingSettings {
   tier1Filters?: TierFilterConfig;  // Custom Tier 1 filter configuration
   tier2Filters?: TierFilterConfig;  // Custom Tier 2 filter configuration
   tier3Filters?: TierFilterConfig;  // Custom Tier 3 filter configuration
+  firmExclusionList?: string;  // Inline list of firms to exclude (newline-separated)
+  firmInclusionList?: string;  // Inline list of firms to include (newline-separated)
+  contactExclusionList?: string;  // Inline list of contacts to exclude (format: Name|Firm, newline-separated)
+  contactInclusionList?: string;  // Inline list of contacts to include (format: Name|Firm, newline-separated)
 }
 
 export interface SettingsPreset {

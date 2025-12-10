@@ -52,6 +52,54 @@ export default function AnalyticsPage() {
     }
   };
 
+  const handleExportDelta = async (tier: 'tier1' | 'tier2' | 'tier3') => {
+    if (!jobId || !analytics?.delta_analysis) return;
+    
+    try {
+      // Create CSV from delta analysis for the specified tier
+      const deltaData = analytics.delta_analysis;
+      const tierRemoved = deltaData.filter((item: any) => 
+        item.PROCESSING_STATUS === 'Removed' && 
+        (tier === 'tier1' ? item.TIER === 'Tier 1' : tier === 'tier2' ? item.TIER === 'Tier 2' : item.TIER === 'Tier 3')
+      );
+      
+      if (tierRemoved.length === 0) {
+        alert(`No removed contacts found for ${tier.toUpperCase()}`);
+        return;
+      }
+      
+      // Convert to CSV
+      const headers = Object.keys(tierRemoved[0]);
+      const csvRows = [
+        headers.join(','),
+        ...tierRemoved.map((row: any) => 
+          headers.map(header => {
+            const value = row[header] || '';
+            // Escape commas and quotes in CSV
+            if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+              return `"${value.replace(/"/g, '""')}"`;
+            }
+            return value;
+          }).join(',')
+        )
+      ];
+      
+      const csvContent = csvRows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `removed_contacts_${tier}_${jobId}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      alert(`Failed to export ${tier} delta list`);
+      console.error(err);
+    }
+  };
+
   if (loading) {
     return <div className="analytics-page">Loading...</div>;
   }
@@ -146,25 +194,52 @@ export default function AnalyticsPage() {
             </section>
           )}
 
-          {analytics?.filter_breakdown && Object.keys(analytics.filter_breakdown).length > 0 && (
+          {analytics?.excluded_firms_list && analytics.excluded_firms_list.length > 0 && (
             <section className="details-section">
-              <h2>Filter Breakdown</h2>
-              <table className="details-table">
-                <thead>
-                  <tr>
-                    <th>Filter Reason</th>
-                    <th>Count</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(analytics.filter_breakdown).map(([reason, count]) => (
-                    <tr key={reason}>
-                      <td>{reason}</td>
-                      <td>{count.toLocaleString()}</td>
-                    </tr>
+              <h2>Removed Firms</h2>
+              <div className="firms-list-container">
+                <p className="section-description">
+                  Total firms removed: {analytics.excluded_firms_list.length}
+                </p>
+                <div className="firms-list">
+                  {analytics.excluded_firms_list.map((firm, index) => (
+                    <span key={index} className="firm-tag">
+                      {firm}
+                    </span>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {analytics?.delta_analysis && Array.isArray(analytics.delta_analysis) && analytics.delta_analysis.length > 0 && (
+            <section className="details-section">
+              <h2>Removed Contacts by Tier</h2>
+              <p className="section-description">
+                Export lists of contacts removed from each tier during filtering.
+              </p>
+              <div className="export-buttons">
+                <button
+                  className="export-button"
+                  onClick={() => handleExportDelta('tier1')}
+                >
+                  Export Tier 1 Removed
+                </button>
+                <button
+                  className="export-button"
+                  onClick={() => handleExportDelta('tier2')}
+                >
+                  Export Tier 2 Removed
+                </button>
+                {summary?.tier3_contacts > 0 && (
+                  <button
+                    className="export-button"
+                    onClick={() => handleExportDelta('tier3')}
+                  >
+                    Export Tier 3 Removed
+                  </button>
+                )}
+              </div>
             </section>
           )}
 

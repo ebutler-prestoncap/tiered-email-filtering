@@ -121,7 +121,11 @@ class Database:
                 "includeKeywords": default_tier3["include"],
                 "excludeKeywords": default_tier3["exclude"],
                 "requireInvestmentTeam": False
-            }
+            },
+            "firmExclusionList": "",
+            "firmInclusionList": "",
+            "contactExclusionList": "",
+            "contactInclusionList": ""
         }
         
         # Check if default preset exists

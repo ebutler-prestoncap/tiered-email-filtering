@@ -40,7 +40,8 @@ def extract_analytics(
     if delta_df is not None:
         analytics["delta_analysis"] = dataframe_to_dict(delta_df)
         analytics["delta_summary"] = extract_delta_summary(delta_df)
-        analytics["filter_breakdown"] = extract_filter_breakdown(delta_df)
+        # Filter breakdown removed - no longer extracted
+        analytics["filter_breakdown"] = None
     else:
         analytics["delta_analysis"] = None
         analytics["delta_summary"] = None
