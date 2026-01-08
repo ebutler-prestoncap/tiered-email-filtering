@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FileUpload from '../components/FileUpload';
 import ConfigurationPanel from '../components/ConfigurationPanel';
 import ProcessingSidePanel from '../components/ProcessingSidePanel';
 import PreviousFilesSelector from '../components/PreviousFilesSelector';
-import { uploadFiles, processContacts } from '../services/api';
+import { uploadFiles, processContacts, listUploadedFiles } from '../services/api';
+import { generatePrefixFromFilenames } from '../utils/filenameUtils';
 import type { ProcessingSettings } from '../types';
 import './ProcessPage.css';
 
@@ -48,6 +49,53 @@ export default function ProcessPage() {
   const [processingStatus, setProcessingStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
+  /**
+   * Update the output prefix based on selected files
+   * @param uploadedFiles - Currently uploaded File objects
+   * @param previousFileIds - IDs of selected previous files
+   */
+  const updatePrefixFromFiles = useCallback(async (
+    uploadedFiles: File[],
+    previousFileIds: string[]
+  ) => {
+    try {
+      const allFilenames: (File | string)[] = [...uploadedFiles];
+      
+      // Fetch names of previously selected files
+      if (previousFileIds.length > 0) {
+        const previousFiles = await listUploadedFiles();
+        const selectedPreviousFiles = previousFiles.filter(file =>
+          previousFileIds.includes(file.id)
+        );
+        selectedPreviousFiles.forEach(file => {
+          allFilenames.push(file.originalName);
+        });
+      }
+      
+      // Generate prefix from all filenames
+      if (allFilenames.length > 0) {
+        const generatedPrefix = generatePrefixFromFilenames(allFilenames);
+        setSettings(prev => ({
+          ...prev,
+          userPrefix: generatedPrefix,
+        }));
+      }
+    } catch (error) {
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Failed to update prefix from files:', error);
+      }
+      // If we have uploaded files, still try to generate prefix from them
+      if (uploadedFiles.length > 0) {
+        const generatedPrefix = generatePrefixFromFilenames(uploadedFiles);
+        setSettings(prev => ({
+          ...prev,
+          userPrefix: generatedPrefix,
+        }));
+      }
+    }
+  }, []);
+
   const handleFilesSelected = (files: File[]) => {
     setUploadedFiles(prev => {
       // Avoid duplicates by checking file name and size
@@ -63,6 +111,13 @@ export default function ProcessPage() {
   const handleRemoveFile = (index: number) => {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
+
+  // Auto-update prefix when files or previous file selection changes
+  useEffect(() => {
+    if (uploadedFiles.length > 0 || selectedPreviousFileIds.length > 0) {
+      updatePrefixFromFiles(uploadedFiles, selectedPreviousFileIds);
+    }
+  }, [uploadedFiles, selectedPreviousFileIds, updatePrefixFromFiles]);
 
   const handleProcess = async () => {
     if (uploadedFiles.length === 0 && selectedPreviousFileIds.length === 0) {
