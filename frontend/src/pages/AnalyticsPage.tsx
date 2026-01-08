@@ -433,15 +433,6 @@ export default function AnalyticsPage() {
                     Export All Removed Contacts ({getAllRemovedContacts().length.toLocaleString()})
                   </button>
                 )}
-                {analytics?.excluded_firms_list && analytics.excluded_firms_list.length > 0 && (
-                  <button
-                    className="export-button"
-                    onClick={handleExportExcludedFirms}
-                    style={{ marginBottom: '1rem', width: '100%' }}
-                  >
-                    Export Excluded Firms ({analytics.excluded_firms_list.length.toLocaleString()})
-                  </button>
-                )}
                 <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                   {getRemovedCount('Tier 1') > 0 && (
                     <button
@@ -501,6 +492,17 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
               </div>
+              {analytics?.excluded_firms_list && analytics.excluded_firms_list.length > 0 && (
+                <div className="export-buttons" style={{ marginTop: '1.5rem' }}>
+                  <button
+                    className="export-button"
+                    onClick={handleExportExcludedFirms}
+                    style={{ width: '100%' }}
+                  >
+                    Export Excluded Firms ({analytics.excluded_firms_list.length.toLocaleString()})
+                  </button>
+                </div>
+              )}
             </section>
           )}
         </div>
