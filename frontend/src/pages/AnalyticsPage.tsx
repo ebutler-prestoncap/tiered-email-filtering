@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getJob, downloadResults } from '../services/api';
-import type { Job, Analytics } from '../types';
+import type { Job } from '../types';
 import './AnalyticsPage.css';
 
 export default function AnalyticsPage() {
@@ -89,7 +89,8 @@ export default function AnalyticsPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `removed_contacts_${tier}_${jobId}.csv`;
+      const prefix = getUserPrefix();
+      a.download = `${prefix}_Removed_${tier.toUpperCase()}.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -115,6 +116,13 @@ export default function AnalyticsPage() {
 
   const analytics = job.analytics;
   const summary = analytics?.processing_summary;
+  
+  // Get user prefix from job settings for export filenames
+  const getUserPrefix = (): string => {
+    const prefix = job?.settings?.userPrefix || 'Combined-Contacts';
+    // Sanitize prefix for filename (remove invalid characters)
+    return prefix.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
+  };
   
   // Get removed contacts count for each tier from delta analysis
   const getRemovedCount = (tier: string) => {
@@ -193,7 +201,8 @@ export default function AnalyticsPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `all_removed_contacts_${jobId}.csv`;
+      const prefix = getUserPrefix();
+      a.download = `${prefix}_All_Removed_Contacts.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -223,7 +232,8 @@ export default function AnalyticsPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `excluded_firms_${jobId}.csv`;
+      const prefix = getUserPrefix();
+      a.download = `${prefix}_Excluded_Firms.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -337,14 +347,23 @@ export default function AnalyticsPage() {
                 </thead>
                 <tbody>
                   {analytics.input_file_details.map((file, index) => {
-                    // Extract filename from path if needed (fallback for UUID-based paths)
-                    const fileName = file.file.includes('/') || file.file.includes('\\')
+                    // Extract filename from path if needed
+                    let fileName = file.file.includes('/') || file.file.includes('\\')
                       ? file.file.split(/[/\\]/).pop() || file.file
                       : file.file;
-                    // Remove UUID prefix if present (format: uuid.xlsx -> original.xlsx)
-                    const displayName = fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\./i)
-                      ? fileName // If it's a UUID, the backend should have mapped it, but show as-is if not mapped
+                    
+                    // Check if it's a UUID filename - if so, try to get original name from job input_files
+                    const isUuid = fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\./i);
+                    if (isUuid && job?.input_files && job.input_files.length > index) {
+                      // Use the original filename from job input_files
+                      fileName = job.input_files[index];
+                    }
+                    
+                    // Extract just the filename if it's still a path
+                    const displayName = fileName.includes('/') || fileName.includes('\\')
+                      ? fileName.split(/[/\\]/).pop() || fileName
                       : fileName;
+                    
                     return (
                       <tr key={index}>
                         <td>{displayName}</td>

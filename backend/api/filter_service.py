@@ -106,8 +106,13 @@ class FilterService:
             
             # Generate output filename
             from datetime import datetime
+            import re
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_filename = f"{user_prefix}_{timestamp}.xlsx"
+            # Sanitize user prefix for filename (remove invalid characters)
+            sanitized_prefix = re.sub(r'[<>:"/\\|?*]', '_', user_prefix).strip()
+            if not sanitized_prefix:
+                sanitized_prefix = "Combined-Contacts"
+            output_filename = f"{sanitized_prefix}_{timestamp}.xlsx"
             
             # Create mapping from UUID filenames to original filenames
             filename_mapping = {}
@@ -115,6 +120,9 @@ class FilterService:
                 for uuid_path, original_name in zip(uploaded_files, original_filenames):
                     uuid_filename = Path(uuid_path).name
                     filename_mapping[uuid_filename] = original_name
+                    logger.info(f"Created filename mapping: {uuid_filename} -> {original_name}")
+            else:
+                logger.warning(f"Filename mapping skipped: original_filenames={len(original_filenames) if original_filenames else 0}, uploaded_files={len(uploaded_files)}")
             
             # Call the main processing method
             # We need to replicate the process_contacts logic but extract analytics
@@ -248,9 +256,18 @@ class FilterService:
         if filename_mapping:
             for info in file_info:
                 uuid_filename = info.get('file', '')
+                # Try exact match first
                 if uuid_filename in filename_mapping:
                     info['file'] = filename_mapping[uuid_filename]
                     logger.info(f"Mapped file name: {uuid_filename} -> {filename_mapping[uuid_filename]}")
+                else:
+                    # Try matching just the filename part (in case of path differences)
+                    uuid_name_only = Path(uuid_filename).name if uuid_filename else ''
+                    if uuid_name_only in filename_mapping:
+                        info['file'] = filename_mapping[uuid_name_only]
+                        logger.info(f"Mapped file name: {uuid_name_only} -> {filename_mapping[uuid_name_only]}")
+                    else:
+                        logger.warning(f"Could not map filename: {uuid_filename} (not found in mapping)")
         
         # Standardize columns
         standardized_df = self.filter.standardize_columns(combined_df)

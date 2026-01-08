@@ -45,13 +45,16 @@ def process_job_async(job_id: str, uploaded_files: list, original_filenames: lis
         # Save analytics to database
         db.save_analytics(job_id, result["analytics"])
         
-        # Move output file to results folder with job ID
+        # Get the generated output filename (preserves user prefix)
         output_path = Path(result["output_path"])
-        new_output_path = RESULTS_FOLDER / f"{job_id}.xlsx"
+        output_filename = output_path.name
+        
+        # Move output file to results folder, keeping the original filename
+        new_output_path = RESULTS_FOLDER / output_filename
         output_path.rename(new_output_path)
         
-        # Update job status
-        db.update_job_status(job_id, "completed", f"{job_id}.xlsx")
+        # Update job status with the proper output filename (includes user prefix)
+        db.update_job_status(job_id, "completed", output_filename)
         
         # Cleanup uploaded files
         cleanup_files(uploaded_files)
