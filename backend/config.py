@@ -10,7 +10,16 @@ BACKEND_DIR = BASE_DIR / "backend"
 FRONTEND_DIR = BASE_DIR / "frontend"
 
 # Database
-DATABASE_PATH = BACKEND_DIR / "data" / "app.db"
+# In Docker, code is mounted at /app, so we need to handle both cases
+# Check if we're in Docker by checking if config.py is in /app directory
+_config_file_dir = Path(__file__).parent
+_docker_data_path = Path("/app/data/app.db")
+if str(_config_file_dir) == "/app" or (Path("/app").exists() and Path("/app/data").exists()):
+    # Running in Docker container - use mounted volume path
+    DATABASE_PATH = _docker_data_path
+else:
+    # Running locally - use relative path from project root
+    DATABASE_PATH = BACKEND_DIR / "data" / "app.db"
 
 # File storage
 UPLOAD_FOLDER = BACKEND_DIR / "uploads"

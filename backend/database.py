@@ -5,6 +5,8 @@ Uses SQLite for minimal storage footprint.
 import sqlite3
 import json
 import uuid
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -15,91 +17,201 @@ logger = logging.getLogger(__name__)
 class Database:
     """SQLite database wrapper for jobs, analytics, and settings presets"""
     
-    def __init__(self, db_path: str = "backend/data/app.db"):
+    def __init__(self, db_path: str = "backend/data/app.db", timeout: float = 20.0):
+        """
+        Initialize database connection.
+        
+        Args:
+            db_path: Path to SQLite database file
+            timeout: Connection timeout in seconds (default: 20.0)
+        """
         self.db_path = Path(db_path)
+        self.timeout = timeout
+        
+        # Ensure data directory exists and is writable
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Verify database path is accessible
+        if not self._verify_database_path():
+            raise RuntimeError(f"Cannot access database path: {self.db_path}")
+        
         self.init_database()
         self.init_default_preset()
     
+    def _verify_database_path(self) -> bool:
+        """Verify database path is accessible and writable"""
+        try:
+            # Check if parent directory is writable
+            test_file = self.db_path.parent / ".test_write"
+            try:
+                test_file.touch()
+                test_file.unlink()
+                return True
+            except (OSError, PermissionError) as e:
+                logger.error(f"Database path not writable: {e}")
+                return False
+        except Exception as e:
+            logger.error(f"Error verifying database path: {e}")
+            return False
+    
+    @contextmanager
     def get_connection(self):
-        """Get database connection"""
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
+        """
+        Get database connection with proper configuration.
+        Uses context manager to ensure connection is always closed.
+        
+        Enables:
+        - WAL mode for better concurrency
+        - Foreign key constraints for data integrity
+        - Timeout to prevent indefinite hangs
+        """
+        conn = None
+        try:
+            conn = sqlite3.connect(
+                str(self.db_path),
+                timeout=self.timeout
+            )
+            conn.row_factory = sqlite3.Row
+            
+            # Enable WAL mode for better concurrency and performance
+            conn.execute("PRAGMA journal_mode=WAL")
+            
+            # Enable foreign key constraints
+            conn.execute("PRAGMA foreign_keys=ON")
+            
+            # Set synchronous mode for better durability (NORMAL is a good balance)
+            conn.execute("PRAGMA synchronous=NORMAL")
+            
+            # Set busy timeout (in milliseconds)
+            conn.execute(f"PRAGMA busy_timeout={int(self.timeout * 1000)}")
+            
+            yield conn
+            conn.commit()
+        except sqlite3.Error as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"Database error: {e}")
+            raise
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"Unexpected database error: {e}")
+            raise
+        finally:
+            if conn:
+                conn.close()
+    
+    def _execute_with_retry(self, operation, max_retries: int = 3, initial_delay: float = 0.1):
+        """
+        Execute database operation with retry logic for transient errors.
+        
+        Args:
+            operation: Callable that performs the database operation
+            max_retries: Maximum number of retry attempts
+            initial_delay: Initial delay between retries in seconds
+        
+        Returns:
+            Result of the operation
+        """
+        last_exception = None
+        
+        for attempt in range(max_retries):
+            try:
+                return operation()
+            except sqlite3.OperationalError as e:
+                error_msg = str(e).lower()
+                # Retry on database locked or busy errors
+                if "locked" in error_msg or "busy" in error_msg:
+                    if attempt < max_retries - 1:
+                        delay = initial_delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"Database locked, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(delay)
+                        last_exception = e
+                        continue
+                # For other operational errors, don't retry
+                raise
+            except sqlite3.Error as e:
+                # For other SQLite errors, don't retry
+                raise
+        
+        # If we exhausted retries, raise the last exception
+        if last_exception:
+            raise last_exception
     
     def init_database(self):
         """Initialize database schema"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _init_schema(conn):
+            cursor = conn.cursor()
+            
+            # Jobs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id TEXT PRIMARY KEY,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status TEXT NOT NULL,
+                    output_filename TEXT,
+                    settings TEXT,
+                    input_files TEXT
+                )
+            """)
+            
+            # Analytics table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS analytics (
+                    job_id TEXT PRIMARY KEY,
+                    processing_summary TEXT,
+                    input_file_details TEXT,
+                    delta_analysis TEXT,
+                    delta_summary TEXT,
+                    filter_breakdown TEXT,
+                    excluded_firms_summary TEXT,
+                    excluded_firms_list TEXT,
+                    included_firms_list TEXT,
+                    excluded_firm_contacts_count INTEGER,
+                    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+                )
+            """)
+            
+            # Settings presets table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS settings_presets (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    is_default INTEGER DEFAULT 0,
+                    settings TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Uploaded files table - stores file metadata for reuse
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS uploaded_files (
+                    id TEXT PRIMARY KEY,
+                    original_name TEXT NOT NULL,
+                    stored_path TEXT NOT NULL,
+                    file_size INTEGER,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at TIMESTAMP
+                )
+            """)
+            
+            # Create indexes
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_presets_default ON settings_presets(is_default)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_uploaded_files_uploaded_at ON uploaded_files(uploaded_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_uploaded_files_last_used ON uploaded_files(last_used_at)")
         
-        # Jobs table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT PRIMARY KEY,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                status TEXT NOT NULL,
-                output_filename TEXT,
-                settings TEXT,
-                input_files TEXT
-            )
-        """)
-        
-        # Analytics table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS analytics (
-                job_id TEXT PRIMARY KEY,
-                processing_summary TEXT,
-                input_file_details TEXT,
-                delta_analysis TEXT,
-                delta_summary TEXT,
-                filter_breakdown TEXT,
-                excluded_firms_summary TEXT,
-                excluded_firms_list TEXT,
-                included_firms_list TEXT,
-                excluded_firm_contacts_count INTEGER,
-                FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
-            )
-        """)
-        
-        # Settings presets table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS settings_presets (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                is_default INTEGER DEFAULT 0,
-                settings TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Uploaded files table - stores file metadata for reuse
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS uploaded_files (
-                id TEXT PRIMARY KEY,
-                original_name TEXT NOT NULL,
-                stored_path TEXT NOT NULL,
-                file_size INTEGER,
-                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_used_at TIMESTAMP
-            )
-        """)
-        
-        # Create indexes
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_presets_default ON settings_presets(is_default)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_uploaded_files_uploaded_at ON uploaded_files(uploaded_at)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_uploaded_files_last_used ON uploaded_files(last_used_at)")
-        
-        conn.commit()
-        conn.close()
-        logger.info("Database initialized")
+        try:
+            with self.get_connection() as conn:
+                _init_schema(conn)
+            logger.info("Database initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
+            raise
     
     def init_default_preset(self):
         """Initialize default settings preset matching CLI defaults"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
         # Import tier config utils for default keywords
         from api.tier_config_utils import (
             get_default_tier1_keywords,
@@ -143,332 +255,524 @@ class Database:
             "fieldFilters": []
         }
         
-        # Check if default preset exists
-        cursor.execute("SELECT id, settings FROM settings_presets WHERE is_default = 1")
-        existing = cursor.fetchone()
-        
-        if existing:
-            # Update existing default preset to ensure it matches current defaults
-            existing_settings = json.loads(existing['settings'])
-            if existing_settings != default_settings:
-                logger.info("Updating default preset to match CLI defaults")
-                cursor.execute("""
-                    UPDATE settings_presets 
-                    SET settings = ?, name = 'Default (CLI Match)'
-                    WHERE id = ?
-                """, (json.dumps(default_settings), existing['id']))
-                conn.commit()
+        def _init_preset(conn):
+            cursor = conn.cursor()
+            
+            # Check if default preset exists
+            cursor.execute("SELECT id, settings FROM settings_presets WHERE is_default = 1")
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing default preset to ensure it matches current defaults
+                existing_settings = json.loads(existing['settings'])
+                if existing_settings != default_settings:
+                    logger.info("Updating default preset to match CLI defaults")
+                    cursor.execute("""
+                        UPDATE settings_presets 
+                        SET settings = ?, name = 'Default (CLI Match)'
+                        WHERE id = ?
+                    """, (json.dumps(default_settings), existing['id']))
+                else:
+                    logger.info("Default preset already matches CLI defaults")
             else:
-                logger.info("Default preset already matches CLI defaults")
-        else:
-            # Create default preset
-            preset_id = str(uuid.uuid4())
-            cursor.execute("""
-                INSERT INTO settings_presets (id, name, is_default, settings)
-                VALUES (?, ?, ?, ?)
-            """, (preset_id, "Default (CLI Match)", 1, json.dumps(default_settings)))
-            conn.commit()
-            logger.info("Default preset initialized with CLI matching settings")
+                # Create default preset
+                preset_id = str(uuid.uuid4())
+                cursor.execute("""
+                    INSERT INTO settings_presets (id, name, is_default, settings)
+                    VALUES (?, ?, ?, ?)
+                """, (preset_id, "Default (CLI Match)", 1, json.dumps(default_settings)))
+                logger.info("Default preset initialized with CLI matching settings")
         
-        conn.close()
+        try:
+            with self.get_connection() as conn:
+                _init_preset(conn)
+        except Exception as e:
+            logger.error(f"Failed to initialize default preset: {e}")
+            raise
     
     def create_job(self, settings: Dict, input_files: List[str]) -> str:
         """Create a new processing job"""
         job_id = str(uuid.uuid4())
-        conn = self.get_connection()
-        cursor = conn.cursor()
         
-        cursor.execute("""
-            INSERT INTO jobs (id, status, settings, input_files)
-            VALUES (?, ?, ?, ?)
-        """, (job_id, "pending", json.dumps(settings), json.dumps(input_files)))
+        def _create_job(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO jobs (id, status, settings, input_files)
+                VALUES (?, ?, ?, ?)
+            """, (job_id, "pending", json.dumps(settings), json.dumps(input_files)))
         
-        conn.commit()
-        conn.close()
-        return job_id
+        try:
+            with self.get_connection() as conn:
+                self._execute_with_retry(lambda: _create_job(conn))
+            logger.debug(f"Created job: {job_id}")
+            return job_id
+        except Exception as e:
+            logger.error(f"Failed to create job: {e}")
+            raise
     
     def update_job_status(self, job_id: str, status: str, output_filename: Optional[str] = None):
         """Update job status"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _update_status(conn):
+            cursor = conn.cursor()
+            if output_filename:
+                cursor.execute("""
+                    UPDATE jobs SET status = ?, output_filename = ? WHERE id = ?
+                """, (status, output_filename, job_id))
+            else:
+                cursor.execute("""
+                    UPDATE jobs SET status = ? WHERE id = ?
+                """, (status, job_id))
         
-        if output_filename:
-            cursor.execute("""
-                UPDATE jobs SET status = ?, output_filename = ? WHERE id = ?
-            """, (status, output_filename, job_id))
-        else:
-            cursor.execute("""
-                UPDATE jobs SET status = ? WHERE id = ?
-            """, (status, job_id))
-        
-        conn.commit()
-        conn.close()
+        try:
+            with self.get_connection() as conn:
+                self._execute_with_retry(lambda: _update_status(conn))
+            logger.debug(f"Updated job {job_id} status to {status}")
+        except Exception as e:
+            logger.error(f"Failed to update job status for {job_id}: {e}")
+            raise
     
     def save_analytics(self, job_id: str, analytics: Dict):
         """Save analytics data for a job"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _save_analytics(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO analytics (
+                    job_id, processing_summary, input_file_details, delta_analysis,
+                    delta_summary, filter_breakdown, excluded_firms_summary,
+                    excluded_firms_list, included_firms_list, excluded_firm_contacts_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                job_id,
+                json.dumps(analytics.get("processing_summary")),
+                json.dumps(analytics.get("input_file_details")),
+                json.dumps(analytics.get("delta_analysis")),
+                json.dumps(analytics.get("delta_summary")),
+                json.dumps(analytics.get("filter_breakdown")),
+                json.dumps(analytics.get("excluded_firms_summary")),
+                json.dumps(analytics.get("excluded_firms_list", [])),
+                json.dumps(analytics.get("included_firms_list", [])),
+                analytics.get("excluded_firm_contacts_count", 0)
+            ))
         
-        cursor.execute("""
-            INSERT OR REPLACE INTO analytics (
-                job_id, processing_summary, input_file_details, delta_analysis,
-                delta_summary, filter_breakdown, excluded_firms_summary,
-                excluded_firms_list, included_firms_list, excluded_firm_contacts_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            job_id,
-            json.dumps(analytics.get("processing_summary")),
-            json.dumps(analytics.get("input_file_details")),
-            json.dumps(analytics.get("delta_analysis")),
-            json.dumps(analytics.get("delta_summary")),
-            json.dumps(analytics.get("filter_breakdown")),
-            json.dumps(analytics.get("excluded_firms_summary")),
-            json.dumps(analytics.get("excluded_firms_list", [])),
-            json.dumps(analytics.get("included_firms_list", [])),
-            analytics.get("excluded_firm_contacts_count", 0)
-        ))
-        
-        conn.commit()
-        conn.close()
+        try:
+            with self.get_connection() as conn:
+                self._execute_with_retry(lambda: _save_analytics(conn))
+            logger.debug(f"Saved analytics for job: {job_id}")
+        except Exception as e:
+            logger.error(f"Failed to save analytics for job {job_id}: {e}")
+            raise
     
     def get_job(self, job_id: str) -> Optional[Dict]:
         """Get job with analytics"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _get_job(conn):
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+            job_row = cursor.fetchone()
+            
+            if not job_row:
+                return None
+            
+            job = dict(job_row)
+            job["settings"] = json.loads(job["settings"])
+            job["input_files"] = json.loads(job["input_files"])
+            
+            # Get analytics
+            cursor.execute("SELECT * FROM analytics WHERE job_id = ?", (job_id,))
+            analytics_row = cursor.fetchone()
+            
+            if analytics_row:
+                analytics = dict(analytics_row)
+                analytics["processing_summary"] = json.loads(analytics["processing_summary"]) if analytics["processing_summary"] else None
+                analytics["input_file_details"] = json.loads(analytics["input_file_details"]) if analytics["input_file_details"] else None
+                analytics["delta_analysis"] = json.loads(analytics["delta_analysis"]) if analytics["delta_analysis"] else None
+                analytics["delta_summary"] = json.loads(analytics["delta_summary"]) if analytics["delta_summary"] else None
+                analytics["filter_breakdown"] = json.loads(analytics["filter_breakdown"]) if analytics["filter_breakdown"] else None
+                analytics["excluded_firms_summary"] = json.loads(analytics["excluded_firms_summary"]) if analytics["excluded_firms_summary"] else None
+                analytics["excluded_firms_list"] = json.loads(analytics["excluded_firms_list"]) if analytics["excluded_firms_list"] else []
+                analytics["included_firms_list"] = json.loads(analytics["included_firms_list"]) if analytics["included_firms_list"] else []
+                job["analytics"] = analytics
+            else:
+                job["analytics"] = None
+            
+            return job
         
-        cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
-        job_row = cursor.fetchone()
-        
-        if not job_row:
-            conn.close()
-            return None
-        
-        job = dict(job_row)
-        job["settings"] = json.loads(job["settings"])
-        job["input_files"] = json.loads(job["input_files"])
-        
-        # Get analytics
-        cursor.execute("SELECT * FROM analytics WHERE job_id = ?", (job_id,))
-        analytics_row = cursor.fetchone()
-        
-        if analytics_row:
-            analytics = dict(analytics_row)
-            analytics["processing_summary"] = json.loads(analytics["processing_summary"]) if analytics["processing_summary"] else None
-            analytics["input_file_details"] = json.loads(analytics["input_file_details"]) if analytics["input_file_details"] else None
-            analytics["delta_analysis"] = json.loads(analytics["delta_analysis"]) if analytics["delta_analysis"] else None
-            analytics["delta_summary"] = json.loads(analytics["delta_summary"]) if analytics["delta_summary"] else None
-            analytics["filter_breakdown"] = json.loads(analytics["filter_breakdown"]) if analytics["filter_breakdown"] else None
-            analytics["excluded_firms_summary"] = json.loads(analytics["excluded_firms_summary"]) if analytics["excluded_firms_summary"] else None
-            analytics["excluded_firms_list"] = json.loads(analytics["excluded_firms_list"]) if analytics["excluded_firms_list"] else []
-            analytics["included_firms_list"] = json.loads(analytics["included_firms_list"]) if analytics["included_firms_list"] else []
-            job["analytics"] = analytics
-        else:
-            job["analytics"] = None
-        
-        conn.close()
-        return job
+        try:
+            with self.get_connection() as conn:
+                return _get_job(conn)
+        except Exception as e:
+            logger.error(f"Failed to get job {job_id}: {e}")
+            raise
     
     def list_jobs(self, limit: int = 50) -> List[Dict]:
         """List all jobs, most recent first"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _list_jobs(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, created_at, status, output_filename, settings, input_files
+                FROM jobs
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (limit,))
+            
+            jobs = []
+            for row in cursor.fetchall():
+                job = dict(row)
+                job["settings"] = json.loads(job["settings"])
+                job["input_files"] = json.loads(job["input_files"])
+                jobs.append(job)
+            
+            return jobs
         
-        cursor.execute("""
-            SELECT id, created_at, status, output_filename, settings, input_files
-            FROM jobs
-            ORDER BY created_at DESC
-            LIMIT ?
-        """, (limit,))
-        
-        jobs = []
-        for row in cursor.fetchall():
-            job = dict(row)
-            job["settings"] = json.loads(job["settings"])
-            job["input_files"] = json.loads(job["input_files"])
-            jobs.append(job)
-        
-        conn.close()
-        return jobs
+        try:
+            with self.get_connection() as conn:
+                return _list_jobs(conn)
+        except Exception as e:
+            logger.error(f"Failed to list jobs: {e}")
+            raise
     
     def delete_job(self, job_id: str) -> bool:
-        """Delete job and its analytics"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        """Delete job and its analytics (cascade deletes analytics due to foreign key)"""
+        def _delete_job(conn):
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+            return cursor.rowcount > 0
         
-        cursor.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
-        deleted = cursor.rowcount > 0
-        
-        conn.commit()
-        conn.close()
-        return deleted
+        try:
+            with self.get_connection() as conn:
+                deleted = self._execute_with_retry(lambda: _delete_job(conn))
+            if deleted:
+                logger.debug(f"Deleted job: {job_id}")
+            return deleted
+        except Exception as e:
+            logger.error(f"Failed to delete job {job_id}: {e}")
+            raise
     
     def create_preset(self, name: str, settings: Dict) -> str:
         """Create a new settings preset"""
         preset_id = str(uuid.uuid4())
-        conn = self.get_connection()
-        cursor = conn.cursor()
         
-        cursor.execute("""
-            INSERT INTO settings_presets (id, name, settings)
-            VALUES (?, ?, ?)
-        """, (preset_id, name, json.dumps(settings)))
+        def _create_preset(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO settings_presets (id, name, settings)
+                VALUES (?, ?, ?)
+            """, (preset_id, name, json.dumps(settings)))
         
-        conn.commit()
-        conn.close()
-        return preset_id
+        try:
+            with self.get_connection() as conn:
+                self._execute_with_retry(lambda: _create_preset(conn))
+            logger.debug(f"Created preset: {preset_id}")
+            return preset_id
+        except Exception as e:
+            logger.error(f"Failed to create preset: {e}")
+            raise
     
     def get_presets(self) -> List[Dict]:
         """Get all presets including default"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _get_presets(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, name, is_default, settings, created_at
+                FROM settings_presets
+                ORDER BY is_default DESC, created_at DESC
+            """)
+            
+            presets = []
+            for row in cursor.fetchall():
+                preset = dict(row)
+                preset["settings"] = json.loads(preset["settings"])
+                preset["is_default"] = bool(preset["is_default"])
+                presets.append(preset)
+            
+            return presets
         
-        cursor.execute("""
-            SELECT id, name, is_default, settings, created_at
-            FROM settings_presets
-            ORDER BY is_default DESC, created_at DESC
-        """)
-        
-        presets = []
-        for row in cursor.fetchall():
-            preset = dict(row)
-            preset["settings"] = json.loads(preset["settings"])
-            preset["is_default"] = bool(preset["is_default"])
-            presets.append(preset)
-        
-        conn.close()
-        return presets
+        try:
+            with self.get_connection() as conn:
+                return _get_presets(conn)
+        except Exception as e:
+            logger.error(f"Failed to get presets: {e}")
+            raise
     
     def update_preset(self, preset_id: str, name: str = None, settings: Dict = None) -> bool:
         """Update a preset's name and/or settings (cannot update default)"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _update_preset(conn):
+            cursor = conn.cursor()
+            
+            # Check if it's the default preset
+            cursor.execute("SELECT is_default FROM settings_presets WHERE id = ?", (preset_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            
+            if row["is_default"]:
+                return False  # Cannot update default preset
+            
+            # Build update query
+            updates = []
+            params = []
+            
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+            
+            if settings is not None:
+                updates.append("settings = ?")
+                params.append(json.dumps(settings))
+            
+            if not updates:
+                return False
+            
+            params.append(preset_id)
+            query = f"UPDATE settings_presets SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(query, params)
+            
+            return cursor.rowcount > 0
         
-        # Check if it's the default preset
-        cursor.execute("SELECT is_default FROM settings_presets WHERE id = ?", (preset_id,))
-        row = cursor.fetchone()
-        if not row:
-            conn.close()
-            return False
-        
-        if row["is_default"]:
-            conn.close()
-            return False  # Cannot update default preset
-        
-        # Build update query
-        updates = []
-        params = []
-        
-        if name is not None:
-            updates.append("name = ?")
-            params.append(name)
-        
-        if settings is not None:
-            updates.append("settings = ?")
-            params.append(json.dumps(settings))
-        
-        if not updates:
-            conn.close()
-            return False
-        
-        params.append(preset_id)
-        query = f"UPDATE settings_presets SET {', '.join(updates)} WHERE id = ?"
-        cursor.execute(query, params)
-        
-        updated = cursor.rowcount > 0
-        conn.commit()
-        conn.close()
-        return updated
+        try:
+            with self.get_connection() as conn:
+                updated = self._execute_with_retry(lambda: _update_preset(conn))
+            if updated:
+                logger.debug(f"Updated preset: {preset_id}")
+            return updated
+        except Exception as e:
+            logger.error(f"Failed to update preset {preset_id}: {e}")
+            raise
     
     def delete_preset(self, preset_id: str) -> bool:
         """Delete a preset (cannot delete default)"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _delete_preset(conn):
+            cursor = conn.cursor()
+            
+            # Check if it's the default preset
+            cursor.execute("SELECT is_default FROM settings_presets WHERE id = ?", (preset_id,))
+            row = cursor.fetchone()
+            if row and row["is_default"]:
+                return False
+            
+            cursor.execute("DELETE FROM settings_presets WHERE id = ?", (preset_id,))
+            return cursor.rowcount > 0
         
-        # Check if it's the default preset
-        cursor.execute("SELECT is_default FROM settings_presets WHERE id = ?", (preset_id,))
-        row = cursor.fetchone()
-        if row and row["is_default"]:
-            conn.close()
-            return False
-        
-        cursor.execute("DELETE FROM settings_presets WHERE id = ?", (preset_id,))
-        deleted = cursor.rowcount > 0
-        
-        conn.commit()
-        conn.close()
-        return deleted
+        try:
+            with self.get_connection() as conn:
+                deleted = self._execute_with_retry(lambda: _delete_preset(conn))
+            if deleted:
+                logger.debug(f"Deleted preset: {preset_id}")
+            return deleted
+        except Exception as e:
+            logger.error(f"Failed to delete preset {preset_id}: {e}")
+            raise
     
     def save_uploaded_file(self, file_id: str, original_name: str, stored_path: str, file_size: int) -> None:
         """Save uploaded file metadata"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _save_file(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO uploaded_files (id, original_name, stored_path, file_size)
+                VALUES (?, ?, ?, ?)
+            """, (file_id, original_name, stored_path, file_size))
         
-        cursor.execute("""
-            INSERT INTO uploaded_files (id, original_name, stored_path, file_size)
-            VALUES (?, ?, ?, ?)
-        """, (file_id, original_name, stored_path, file_size))
-        
-        conn.commit()
-        conn.close()
+        try:
+            with self.get_connection() as conn:
+                self._execute_with_retry(lambda: _save_file(conn))
+            logger.debug(f"Saved uploaded file: {file_id}")
+        except Exception as e:
+            logger.error(f"Failed to save uploaded file {file_id}: {e}")
+            raise
     
     def get_uploaded_file(self, file_id: str) -> Optional[Dict]:
         """Get uploaded file metadata"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _get_file(conn):
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM uploaded_files WHERE id = ?", (file_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
         
-        cursor.execute("SELECT * FROM uploaded_files WHERE id = ?", (file_id,))
-        row = cursor.fetchone()
-        
-        conn.close()
-        if row:
-            return dict(row)
-        return None
+        try:
+            with self.get_connection() as conn:
+                return _get_file(conn)
+        except Exception as e:
+            logger.error(f"Failed to get uploaded file {file_id}: {e}")
+            raise
     
     def list_uploaded_files(self, limit: int = 100) -> List[Dict]:
         """List all uploaded files, most recent first"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _list_files(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, original_name, stored_path, file_size, uploaded_at, last_used_at
+                FROM uploaded_files
+                ORDER BY uploaded_at DESC
+                LIMIT ?
+            """, (limit,))
+            
+            files = []
+            for row in cursor.fetchall():
+                file_dict = dict(row)
+                # Include file even if it's been deleted (for history/reference)
+                # The file may have been processed and cleaned up, but metadata is still useful
+                files.append(file_dict)
+            
+            return files
         
-        cursor.execute("""
-            SELECT id, original_name, stored_path, file_size, uploaded_at, last_used_at
-            FROM uploaded_files
-            ORDER BY uploaded_at DESC
-            LIMIT ?
-        """, (limit,))
-        
-        files = []
-        for row in cursor.fetchall():
-            file_dict = dict(row)
-            # Include file even if it's been deleted (for history/reference)
-            # The file may have been processed and cleaned up, but metadata is still useful
-            files.append(file_dict)
-        
-        conn.close()
-        return files
+        try:
+            with self.get_connection() as conn:
+                return _list_files(conn)
+        except Exception as e:
+            logger.error(f"Failed to list uploaded files: {e}")
+            raise
     
     def update_file_last_used(self, file_id: str) -> None:
         """Update last_used_at timestamp for a file"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _update_timestamp(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE uploaded_files 
+                SET last_used_at = CURRENT_TIMESTAMP 
+                WHERE id = ?
+            """, (file_id,))
         
-        cursor.execute("""
-            UPDATE uploaded_files 
-            SET last_used_at = CURRENT_TIMESTAMP 
-            WHERE id = ?
-        """, (file_id,))
-        
-        conn.commit()
-        conn.close()
+        try:
+            with self.get_connection() as conn:
+                self._execute_with_retry(lambda: _update_timestamp(conn))
+            logger.debug(f"Updated last_used_at for file: {file_id}")
+        except Exception as e:
+            logger.error(f"Failed to update last_used_at for file {file_id}: {e}")
+            raise
     
     def delete_uploaded_file(self, file_id: str) -> bool:
         """Delete uploaded file record"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        def _delete_file(conn):
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM uploaded_files WHERE id = ?", (file_id,))
+            return cursor.rowcount > 0
         
-        cursor.execute("DELETE FROM uploaded_files WHERE id = ?", (file_id,))
-        deleted = cursor.rowcount > 0
+        try:
+            with self.get_connection() as conn:
+                deleted = self._execute_with_retry(lambda: _delete_file(conn))
+            if deleted:
+                logger.debug(f"Deleted uploaded file: {file_id}")
+            return deleted
+        except Exception as e:
+            logger.error(f"Failed to delete uploaded file {file_id}: {e}")
+            raise
+    
+    def verify_database_integrity(self) -> Dict[str, Any]:
+        """
+        Verify database integrity using SQLite's integrity check.
         
-        conn.commit()
-        conn.close()
-        return deleted
+        Returns:
+            Dictionary with integrity check results:
+            - ok: bool - True if integrity check passed
+            - errors: List[str] - List of integrity errors if any
+            - foreign_key_violations: List[Dict] - Foreign key violations if any
+        """
+        result = {
+            "ok": True,
+            "errors": [],
+            "foreign_key_violations": []
+        }
+        
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Run SQLite integrity check
+                cursor.execute("PRAGMA integrity_check")
+                integrity_result = cursor.fetchone()
+                
+                if integrity_result and integrity_result[0] != "ok":
+                    result["ok"] = False
+                    result["errors"].append(integrity_result[0])
+                    logger.warning(f"Database integrity check failed: {integrity_result[0]}")
+                
+                # Check for foreign key violations
+                cursor.execute("PRAGMA foreign_key_check")
+                fk_violations = cursor.fetchall()
+                
+                if fk_violations:
+                    result["ok"] = False
+                    for violation in fk_violations:
+                        violation_dict = {
+                            "table": violation[0],
+                            "rowid": violation[1],
+                            "parent": violation[2],
+                            "fkid": violation[3]
+                        }
+                        result["foreign_key_violations"].append(violation_dict)
+                        logger.warning(f"Foreign key violation: {violation_dict}")
+                
+                if result["ok"]:
+                    logger.info("Database integrity check passed")
+                
+        except Exception as e:
+            result["ok"] = False
+            result["errors"].append(str(e))
+            logger.error(f"Database integrity check error: {e}")
+        
+        return result
+    
+    def check_database_health(self) -> Dict[str, Any]:
+        """
+        Check database health and accessibility.
+        
+        Returns:
+            Dictionary with health check results:
+            - accessible: bool - True if database file is accessible
+            - writable: bool - True if database is writable
+            - file_exists: bool - True if database file exists
+            - file_size: int - Size of database file in bytes
+            - table_counts: Dict[str, int] - Count of records in each table
+        """
+        health = {
+            "accessible": False,
+            "writable": False,
+            "file_exists": False,
+            "file_size": 0,
+            "table_counts": {}
+        }
+        
+        try:
+            # Check if file exists
+            health["file_exists"] = self.db_path.exists()
+            
+            if health["file_exists"]:
+                # Check file size
+                health["file_size"] = self.db_path.stat().st_size
+                
+                # Try to access database
+                try:
+                    with self.get_connection() as conn:
+                        cursor = conn.cursor()
+                        
+                        # Check if we can read
+                        cursor.execute("SELECT 1")
+                        cursor.fetchone()
+                        health["accessible"] = True
+                        
+                        # Check if we can write
+                        cursor.execute("SELECT COUNT(*) FROM jobs")
+                        cursor.fetchone()
+                        health["writable"] = True
+                        
+                        # Get table counts
+                        tables = ["jobs", "analytics", "settings_presets", "uploaded_files"]
+                        for table in tables:
+                            try:
+                                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                                count = cursor.fetchone()[0]
+                                health["table_counts"][table] = count
+                            except Exception as e:
+                                logger.warning(f"Could not count records in {table}: {e}")
+                                health["table_counts"][table] = -1
+                        
+                except Exception as e:
+                    logger.error(f"Database health check failed: {e}")
+                    health["accessible"] = False
+                    health["writable"] = False
+            
+        except Exception as e:
+            logger.error(f"Error checking database health: {e}")
+        
+        return health
 
