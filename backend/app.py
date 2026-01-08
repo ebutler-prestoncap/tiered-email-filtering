@@ -67,8 +67,8 @@ def process_job_async(job_id: str, uploaded_files: list, original_filenames: lis
         # Cleanup uploaded files even on error
         try:
             cleanup_files(uploaded_files)
-        except:
-            pass
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to cleanup files for job {job_id}: {cleanup_error}")
 
 @app.route('/api/upload', methods=['POST'])
 def upload_files():
@@ -93,13 +93,20 @@ def upload_files():
             "fileIds": file_ids
         }), 200
     except Exception as e:
-        logger.error(f"Upload error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 400
+        logger.error(f"Upload error: {e}", exc_info=True)
+        # Sanitize error message to prevent information leakage
+        error_msg = "Failed to upload files"
+        if isinstance(e, ValueError):
+            error_msg = str(e)  # ValueError messages are usually safe
+        return jsonify({"success": False, "error": error_msg}), 400
 
 @app.route('/api/process', methods=['POST'])
 def process_contacts():
     """Start processing job"""
     try:
+        if not request.json:
+            return jsonify({"success": False, "error": "Invalid request: JSON body required"}), 400
+        
         data = request.json
         files = data.get("files", [])  # Can be file paths
         file_ids = data.get("fileIds", [])  # Optional: file IDs from database
@@ -108,6 +115,10 @@ def process_contacts():
         if not files and not file_ids:
             return jsonify({"success": False, "error": "No files provided"}), 400
         
+        # Validate settings is a dict
+        if not isinstance(settings, dict):
+            return jsonify({"success": False, "error": "Invalid settings format"}), 400
+        
         # Get full paths for uploaded files
         uploaded_files = []
         original_filenames = []
@@ -115,42 +126,56 @@ def process_contacts():
         
         # Process file IDs first (previously uploaded files)
         if file_ids:
+            if not isinstance(file_ids, list):
+                return jsonify({"success": False, "error": "Invalid fileIds format"}), 400
+            
             for file_id in file_ids:
-                file_meta = db.get_uploaded_file(file_id)
-                if file_meta and Path(file_meta["stored_path"]).exists():
-                    uploaded_files.append(file_meta["stored_path"])
-                    original_filenames.append(file_meta["original_name"])
-                    all_file_names.append(file_meta["original_name"])
-                    # Update last used timestamp
-                    db.update_file_last_used(file_id)
-                else:
-                    raise ValueError(f"File ID not found or file missing: {file_id}")
-        
-        # Process new file paths
-        for f in files:
-            if not f or f.strip() == '':  # Skip empty placeholders for file IDs
-                continue
+                if not isinstance(file_id, str) or not file_id.strip():
+                    continue
                 
-            file_path = None
-            original_name = None
+                file_meta = db.get_uploaded_file(file_id)
+                if file_meta:
+                    stored_path = file_meta.get("stored_path")
+                    # Validate path is within upload folder to prevent path traversal
+                    if stored_path:
+                        stored_path_obj = Path(stored_path)
+                        try:
+                            stored_path_obj.resolve().relative_to(UPLOAD_FOLDER.resolve())
+                        except ValueError:
+                            logger.warning(f"Invalid file path detected: {stored_path}")
+                            continue
+                        
+                        if stored_path_obj.exists():
+                            uploaded_files.append(str(stored_path_obj))
+                            original_filenames.append(file_meta.get("original_name", ""))
+                            all_file_names.append(file_meta.get("original_name", ""))
+                            # Update last used timestamp
+                            db.update_file_last_used(file_id)
+        
+        # Process new file paths - only allow files in upload folder
+        if files:
+            if not isinstance(files, list):
+                return jsonify({"success": False, "error": "Invalid files format"}), 400
             
-            # Check if it's already a full path
-            if Path(f).is_absolute() and Path(f).exists():
-                file_path = str(Path(f))
-                original_name = Path(f).name
-            else:
-                # Assume it's a filename in the upload folder
-                file_path_obj = UPLOAD_FOLDER / Path(f).name
+            for f in files:
+                if not f or not isinstance(f, str) or f.strip() == '':
+                    continue
+                
+                # Prevent path traversal - only allow filenames, not paths
+                file_name = Path(f).name  # Extract just the filename
+                file_path_obj = UPLOAD_FOLDER / file_name
+                
+                # Validate path is within upload folder
+                try:
+                    file_path_obj.resolve().relative_to(UPLOAD_FOLDER.resolve())
+                except ValueError:
+                    logger.warning(f"Path traversal attempt detected: {f}")
+                    continue
+                
                 if file_path_obj.exists():
-                    file_path = str(file_path_obj)
-                    original_name = Path(f).name
-                else:
-                    raise ValueError(f"Could not find uploaded file: {f} (checked {file_path_obj})")
-            
-            if file_path:
-                uploaded_files.append(file_path)
-                original_filenames.append(original_name or Path(file_path).name)
-                all_file_names.append(original_name or Path(file_path).name)
+                    uploaded_files.append(str(file_path_obj))
+                    original_filenames.append(file_name)
+                    all_file_names.append(file_name)
         
         if not uploaded_files:
             return jsonify({"success": False, "error": "No valid files found"}), 400
@@ -181,8 +206,9 @@ def process_contacts():
         }), 200
         
     except Exception as e:
-        logger.error(f"Process error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 400
+        logger.error(f"Process error: {e}", exc_info=True)
+        # Don't expose internal error details to client
+        return jsonify({"success": False, "error": "Failed to process files. Please try again."}), 400
 
 @app.route('/api/jobs/<job_id>', methods=['GET'])
 def get_job(job_id: str):
@@ -199,7 +225,8 @@ def get_job(job_id: str):
                 "created_at": job["created_at"],
                 "status": job["status"],
                 "settings": job["settings"],
-                "input_files": job["input_files"]
+                "input_files": job["input_files"],
+                "output_filename": job.get("output_filename")
             }
         }
         
@@ -212,8 +239,8 @@ def get_job(job_id: str):
         return jsonify(response), 200
         
     except Exception as e:
-        logger.error(f"Get job error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"Get job error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to retrieve job information"}), 500
 
 @app.route('/api/jobs/<job_id>/download', methods=['GET'])
 def download_results(job_id: str):
@@ -238,8 +265,8 @@ def download_results(job_id: str):
         )
         
     except Exception as e:
-        logger.error(f"Download error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"Download error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to download file"}), 500
 
 @app.route('/api/jobs', methods=['GET'])
 def list_jobs():
@@ -264,8 +291,8 @@ def list_jobs():
         }), 200
         
     except Exception as e:
-        logger.error(f"List jobs error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"List jobs error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to list jobs"}), 500
 
 @app.route('/api/jobs/<job_id>', methods=['DELETE'])
 def delete_job(job_id: str):
@@ -290,8 +317,8 @@ def delete_job(job_id: str):
             return jsonify({"success": False, "error": "Could not delete job"}), 500
         
     except Exception as e:
-        logger.error(f"Delete job error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"Delete job error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to delete job"}), 500
 
 @app.route('/api/settings/presets', methods=['GET'])
 def get_presets():
@@ -310,12 +337,18 @@ def get_presets():
 def create_preset():
     """Create a new settings preset"""
     try:
+        if not request.json:
+            return jsonify({"success": False, "error": "Invalid request: JSON body required"}), 400
+        
         data = request.json
         name = data.get("name")
         settings = data.get("settings")
         
-        if not name or not settings:
-            return jsonify({"success": False, "error": "Name and settings required"}), 400
+        if not name or not isinstance(name, str) or not name.strip():
+            return jsonify({"success": False, "error": "Valid preset name required"}), 400
+        
+        if not settings or not isinstance(settings, dict):
+            return jsonify({"success": False, "error": "Valid settings dictionary required"}), 400
         
         preset_id = db.create_preset(name, settings)
         return jsonify({
@@ -324,16 +357,25 @@ def create_preset():
         }), 201
         
     except Exception as e:
-        logger.error(f"Create preset error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"Create preset error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to create preset"}), 500
 
 @app.route('/api/settings/presets/<preset_id>', methods=['PUT'])
 def update_preset(preset_id: str):
     """Update a settings preset"""
     try:
+        if not request.json:
+            return jsonify({"success": False, "error": "Invalid request: JSON body required"}), 400
+        
         data = request.json
         name = data.get("name")
         settings = data.get("settings")
+        
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            return jsonify({"success": False, "error": "Invalid preset name"}), 400
+        
+        if settings is not None and not isinstance(settings, dict):
+            return jsonify({"success": False, "error": "Invalid settings format"}), 400
         
         if name is None and settings is None:
             return jsonify({"success": False, "error": "Name or settings required"}), 400
@@ -345,8 +387,8 @@ def update_preset(preset_id: str):
             return jsonify({"success": False, "error": "Could not update preset (may be default or not found)"}), 400
         
     except Exception as e:
-        logger.error(f"Update preset error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"Update preset error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to update preset"}), 500
 
 @app.route('/api/settings/presets/<preset_id>', methods=['DELETE'])
 def delete_preset(preset_id: str):
@@ -358,8 +400,8 @@ def delete_preset(preset_id: str):
         else:
             return jsonify({"success": False, "error": "Could not delete preset (may be default)"}), 400
     except Exception as e:
-        logger.error(f"Delete preset error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"Delete preset error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to delete preset"}), 500
 
 @app.route('/api/files', methods=['GET'])
 def list_uploaded_files():
@@ -384,8 +426,8 @@ def list_uploaded_files():
             ]
         }), 200
     except Exception as e:
-        logger.error(f"List files error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.error(f"List files error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to list files"}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
