@@ -46,10 +46,14 @@ def process_job_async(job_id: str, uploaded_files: list, original_filenames: lis
         db.save_analytics(job_id, result["analytics"])
         
         # Get the generated output filename (preserves user prefix)
-        output_path = Path(result["output_path"])
-        output_filename = output_path.name
+        output_filename = result.get("output_filename")
+        if not output_filename:
+            # Fallback: extract from path if filename not in result
+            output_path = Path(result["output_path"])
+            output_filename = output_path.name
         
         # Move output file to results folder, keeping the original filename
+        output_path = Path(result["output_path"])
         new_output_path = RESULTS_FOLDER / output_filename
         output_path.rename(new_output_path)
         

@@ -243,7 +243,7 @@ class FilterService:
         include_all_firms: bool,
         user_prefix: str,
         output_filename: str,
-        filename_mapping: Dict[str, str] = None
+        filename_mapping: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Process contacts and extract analytics"""
         # Clean output folder
@@ -434,6 +434,7 @@ class FilterService:
         
         return {
             "output_path": output_path,
+            "output_filename": output_filename,
             "analytics": analytics
         }
 
