@@ -15,7 +15,8 @@ export default function AnalyticsPage() {
     if (jobId) {
       loadJob();
     }
-  }, [jobId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]); // loadJob is stable and doesn't need to be in deps
 
   const loadJob = async () => {
     if (!jobId) return;
@@ -27,7 +28,10 @@ export default function AnalyticsPage() {
       setError(null);
     } catch (err) {
       setError('Failed to load job data');
-      console.error(err);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Failed to load job:', err);
+      }
     } finally {
       setLoading(false);
     }
@@ -41,14 +45,34 @@ export default function AnalyticsPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = job?.output_filename || 'results.xlsx';
+      
+      // Generate filename using same method as CSV exports (user prefix from settings)
+      const prefix = getUserPrefix();
+      // Get timestamp from job creation date or use current date (format: YYYYMMDD_HHMMSS)
+      const getTimestamp = (date: Date): string => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+      };
+      const timestamp = job?.created_at 
+        ? getTimestamp(new Date(job.created_at))
+        : getTimestamp(new Date());
+      a.download = `${prefix}_${timestamp}.xlsx`;
+      
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
       alert('Failed to download file');
-      console.error(err);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Download error:', err);
+      }
     }
   };
 
@@ -97,7 +121,10 @@ export default function AnalyticsPage() {
       document.body.removeChild(a);
     } catch (err) {
       alert(`Failed to export ${tier} delta list`);
-      console.error(err);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Export error:', err);
+      }
     }
   };
 
@@ -209,7 +236,10 @@ export default function AnalyticsPage() {
       document.body.removeChild(a);
     } catch (err) {
       alert('Failed to export all removed contacts');
-      console.error(err);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Export error:', err);
+      }
     }
   };
 
@@ -240,7 +270,10 @@ export default function AnalyticsPage() {
       document.body.removeChild(a);
     } catch (err) {
       alert('Failed to export excluded firms');
-      console.error(err);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Export error:', err);
+      }
     }
   };
 
