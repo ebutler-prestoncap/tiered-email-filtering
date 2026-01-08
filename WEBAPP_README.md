@@ -116,9 +116,11 @@ The default preset matches the CLI tool behavior:
 ## Storage
 
 - **Database**: SQLite database at `backend/data/app.db`
-- **Uploads**: Temporary files in `backend/uploads/`
-- **Results**: Excel files in `backend/results/`
-- **Cleanup**: Files are automatically cleaned up after 7 days
+- **Uploads**: Files stored in `backend/uploads/` (or `/app/uploads` in Docker)
+- **Results**: Excel files in `backend/results/` (or `/app/results` in Docker)
+- **Architecture**: Files stored on disk, metadata in database (see [docs/FILE_STORAGE.md](../docs/FILE_STORAGE.md))
+- **Persistence**: Files persist across container restarts via mounted volumes
+- **Reuse**: Previously uploaded files can be reused for new processing jobs
 
 ## Differences from CLI
 

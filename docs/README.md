@@ -7,6 +7,9 @@ This folder contains comprehensive documentation for the tiered contact filterin
 ### [FILTERING_LOGIC.md](./FILTERING_LOGIC.md)
 Complete outline of all filtering criteria, inclusions, exclusions, and processing logic for all tiers.
 
+### [FILE_STORAGE.md](./FILE_STORAGE.md)
+Comprehensive documentation of the file storage architecture, including how files are stored on disk vs. in the database, persistence across restarts, and file reuse capabilities.
+
 **Sections:**
 - Pre-Filtering Steps (deduplication, firm exclusion, contact inclusion)
 - Tier 1 - Key Contacts (senior decision makers)
