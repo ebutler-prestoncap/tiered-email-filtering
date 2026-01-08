@@ -20,7 +20,7 @@ interface PreviousFilesSelectorProps {
 
 export default function PreviousFilesSelector({ selectedFileIds, onSelectionChange }: PreviousFilesSelectorProps) {
   const [files, setFiles] = useState<UploadedFile[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -31,9 +31,14 @@ export default function PreviousFilesSelector({ selectedFileIds, onSelectionChan
     setIsLoading(true);
     try {
       const uploadedFiles = await listUploadedFiles();
-      setFiles(uploadedFiles);
+      // Only show files that exist and can be selected
+      const availableFiles = uploadedFiles.filter(file => file.fileExists !== false);
+      setFiles(availableFiles);
     } catch (error) {
-      console.error('Failed to load uploaded files:', error);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Failed to load uploaded files:', error);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -65,7 +70,7 @@ export default function PreviousFilesSelector({ selectedFileIds, onSelectionChan
       >
         <span className="selector-icon">📂</span>
         <span className="selector-label">
-          Previously Uploaded Files
+          Previously Uploaded Input Lists
           {selectedFileIds.length > 0 && (
             <span className="selected-count"> ({selectedFileIds.length} selected)</span>
           )}
@@ -78,29 +83,28 @@ export default function PreviousFilesSelector({ selectedFileIds, onSelectionChan
           {isLoading ? (
             <div className="selector-loading">Loading files...</div>
           ) : files.length === 0 ? (
-            <div className="selector-empty">No previously uploaded files</div>
+            <div className="selector-empty">
+              <p>No previously uploaded files</p>
+              <p className="selector-empty-hint">Upload files to see them here for future use</p>
+            </div>
           ) : (
             <div className="selector-list">
               {files.map((file) => (
                 <label 
                   key={file.id} 
-                  className={`selector-item ${file.fileExists === false ? 'file-processed' : ''}`}
+                  className="selector-item"
+                  htmlFor={`file-checkbox-${file.id}`}
                 >
                   <input
+                    id={`file-checkbox-${file.id}`}
                     type="checkbox"
                     checked={selectedFileIds.includes(file.id)}
                     onChange={() => handleToggleFile(file.id)}
-                    disabled={file.fileExists === false}
                     className="selector-checkbox"
                   />
                   <div className="selector-item-content">
                     <div className="selector-item-name">
                       {file.originalName}
-                      {file.fileExists === false && (
-                        <span className="file-processed-badge" title="File has been processed and is no longer available for reprocessing">
-                          (Processed)
-                        </span>
-                      )}
                     </div>
                     <div className="selector-item-meta">
                       <span>{formatFileSize(file.fileSize)}</span>

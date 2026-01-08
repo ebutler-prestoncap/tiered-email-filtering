@@ -60,19 +60,15 @@ def process_job_async(job_id: str, uploaded_files: list, original_filenames: lis
         # Update job status with the proper output filename (includes user prefix)
         db.update_job_status(job_id, "completed", output_filename)
         
-        # Cleanup uploaded files
-        cleanup_files(uploaded_files)
-        
-        logger.info(f"Job {job_id} completed successfully")
+        # Don't delete uploaded files - keep them for reuse
+        # Files are saved in the database and users may want to reuse them
+        logger.info(f"Job {job_id} completed successfully. Files kept for potential reuse.")
         
     except Exception as e:
         logger.error(f"Error processing job {job_id}: {e}", exc_info=True)
         db.update_job_status(job_id, "failed")
-        # Cleanup uploaded files even on error
-        try:
-            cleanup_files(uploaded_files)
-        except Exception as cleanup_error:
-            logger.warning(f"Failed to cleanup files for job {job_id}: {cleanup_error}")
+        # Don't delete files on error either - keep them for potential retry or reuse
+        logger.info(f"Job {job_id} failed. Files kept for potential reuse.")
 
 @app.route('/api/upload', methods=['POST'])
 def upload_files():
@@ -177,7 +173,8 @@ def process_contacts():
                     continue
                 
                 if file_path_obj.exists():
-                    uploaded_files.append(str(file_path_obj))
+                    file_path_str = str(file_path_obj)
+                    uploaded_files.append(file_path_str)
                     original_filenames.append(file_name)
                     all_file_names.append(file_name)
         
