@@ -124,7 +124,7 @@
 /* Desktop: Sidebar always visible */
 @media (min-width: 1024px) {
   .sidebar {
-    position: relative;
+    position: fixed;
     transform: translateX(0);
     box-shadow: none;
   }

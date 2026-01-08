@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getPresets, createPreset, updatePreset, deletePreset } from '../services/api';
 import type { SettingsPreset, ProcessingSettings } from '../types';
+import FieldFilters from '../components/FieldFilters';
 import './SettingsPage.css';
 
 export default function SettingsPage() {
@@ -36,13 +37,14 @@ export default function SettingsPage() {
     // Use default settings as base
     const defaultSettings: ProcessingSettings = {
       includeAllFirms: false,
-      findEmails: false,
+      findEmails: true,
       firmExclusion: false,
       contactInclusion: false,
       tier1Limit: 10,
       tier2Limit: 6,
       tier3Limit: 3,
       userPrefix: 'Combined-Contacts',
+      fieldFilters: [],
     };
 
     try {
@@ -270,6 +272,12 @@ export default function SettingsPage() {
                           />
                         </label>
                       </div>
+                    </div>
+                    <div className="edit-field-filters">
+                      <FieldFilters
+                        filters={editSettings?.fieldFilters || []}
+                        onFiltersChange={(filters) => setEditSettings(prev => prev ? { ...prev, fieldFilters: filters } : null)}
+                      />
                     </div>
                     <div className="edit-actions">
                       <button className="cancel-button" onClick={handleCancelEdit}>

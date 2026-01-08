@@ -40,7 +40,7 @@ def process_job_async(job_id: str, uploaded_files: list, original_filenames: lis
         )
         
         # Process contacts
-        result = filter_service.process_contacts(uploaded_files, settings, job_id)
+        result = filter_service.process_contacts(uploaded_files, settings, job_id, original_filenames)
         
         # Save analytics to database
         db.save_analytics(job_id, result["analytics"])
@@ -152,8 +152,16 @@ def process_contacts():
         if not uploaded_files:
             return jsonify({"success": False, "error": "No valid files found"}), 400
         
+        # Deduplicate file names (in case same file was added via both fileIds and files)
+        unique_file_names = []
+        seen_names = set()
+        for name in all_file_names:
+            if name not in seen_names:
+                unique_file_names.append(name)
+                seen_names.add(name)
+        
         # Create job - store original file names for display
-        job_id = db.create_job(settings, all_file_names)
+        job_id = db.create_job(settings, unique_file_names)
         
         # Start background processing
         thread = threading.Thread(
@@ -245,7 +253,8 @@ def list_jobs():
                     "created_at": job["created_at"],
                     "status": job["status"],
                     "input_files": job["input_files"],
-                    "settings": job["settings"]
+                    "settings": job["settings"],
+                    "output_filename": job.get("output_filename")
                 }
                 for job in jobs
             ]
@@ -365,7 +374,8 @@ def list_uploaded_files():
                     "storedPath": f["stored_path"],
                     "fileSize": f["file_size"],
                     "uploadedAt": f["uploaded_at"],
-                    "lastUsedAt": f["last_used_at"]
+                    "lastUsedAt": f["last_used_at"],
+                    "fileExists": Path(f["stored_path"]).exists() if f.get("stored_path") else False
                 }
                 for f in files
             ]

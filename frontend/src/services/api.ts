@@ -140,6 +140,7 @@ export interface UploadedFile {
   fileSize: number;
   uploadedAt: string;
   lastUsedAt: string | null;
+  fileExists?: boolean;
 }
 
 export const listUploadedFiles = async (limit: number = 100): Promise<UploadedFile[]> => {

@@ -3,6 +3,7 @@ import type { ProcessingSettings, SettingsPreset, TierFilterConfig } from '../ty
 import { getPresets, createPreset, updatePreset } from '../services/api';
 import TierFilterConfigComponent from './TierFilterConfig';
 import ListInput from './ListInput';
+import FieldFilters from './FieldFilters';
 import './ConfigurationPanel.css';
 
 interface ConfigurationPanelProps {
@@ -42,7 +43,7 @@ export default function ConfigurationPanel({
         // Fallback to hardcoded defaults if no preset found
         const fallbackSettings: ProcessingSettings = {
           includeAllFirms: false,
-          findEmails: false,
+          findEmails: true,
           firmExclusion: false,
           contactInclusion: false,
           tier1Limit: 10,
@@ -68,6 +69,7 @@ export default function ConfigurationPanel({
           firmInclusionList: '',
           contactExclusionList: '',
           contactInclusionList: '',
+          fieldFilters: [],
         };
         onSettingsChange(fallbackSettings);
       }
@@ -76,7 +78,7 @@ export default function ConfigurationPanel({
       // Fallback to hardcoded defaults on error
       const fallbackSettings: ProcessingSettings = {
         includeAllFirms: false,
-        findEmails: false,
+        findEmails: true,
         firmExclusion: false,
         contactInclusion: false,
         tier1Limit: 10,
@@ -98,12 +100,13 @@ export default function ConfigurationPanel({
           excludeKeywords: [],
           requireInvestmentTeam: false,
         },
-        firmExclusionList: '',
-        firmInclusionList: '',
-        contactExclusionList: '',
-        contactInclusionList: '',
-      };
-      onSettingsChange(fallbackSettings);
+          firmExclusionList: '',
+          firmInclusionList: '',
+          contactExclusionList: '',
+          contactInclusionList: '',
+          fieldFilters: [],
+        };
+        onSettingsChange(fallbackSettings);
     }
   };
 
@@ -286,6 +289,14 @@ export default function ConfigurationPanel({
             hint="Format: Name|Firm or Name, Firm (one per line). These contacts will be forced through filters."
           />
         </div>
+      </div>
+
+      {/* Field Filters */}
+      <div className="config-group">
+        <FieldFilters
+          filters={settings.fieldFilters || []}
+          onFiltersChange={(filters) => updateSetting('fieldFilters', filters)}
+        />
       </div>
 
       {/* Tier Filter Configuration */}

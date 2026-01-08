@@ -4,6 +4,7 @@ import FileUpload from '../components/FileUpload';
 import ConfigurationPanel from '../components/ConfigurationPanel';
 import ProcessingSidePanel from '../components/ProcessingSidePanel';
 import PreviousFilesSelector from '../components/PreviousFilesSelector';
+import ProcessedFilesModal from '../components/ProcessedFilesModal';
 import { uploadFiles, processContacts } from '../services/api';
 import type { ProcessingSettings } from '../types';
 import './ProcessPage.css';
@@ -13,10 +14,11 @@ export default function ProcessPage() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [selectedPreviousFileIds, setSelectedPreviousFileIds] = useState<string[]>([]);
   const [showProcessingPanel, setShowProcessingPanel] = useState(false);
+  const [showProcessedFilesModal, setShowProcessedFilesModal] = useState(false);
   // Initialize with default values - ConfigurationPanel will update with preset
   const [settings, setSettings] = useState<ProcessingSettings>({
     includeAllFirms: false,
-    findEmails: false,
+    findEmails: true,
     firmExclusion: false,
     contactInclusion: false,
     tier1Limit: 10,
@@ -42,6 +44,7 @@ export default function ProcessPage() {
     firmInclusionList: '',
     contactExclusionList: '',
     contactInclusionList: '',
+    fieldFilters: [],
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | null>(null);
@@ -57,6 +60,18 @@ export default function ProcessPage() {
         )
       );
       return [...prev, ...newFiles];
+    });
+  };
+
+  const handleProcessedFileSelected = (file: File) => {
+    setUploadedFiles(prev => {
+      // Avoid duplicates by checking file name and size
+      if (!prev.some(existingFile => 
+        existingFile.name === file.name && existingFile.size === file.size
+      )) {
+        return [...prev, file];
+      }
+      return prev;
     });
   };
 
@@ -140,12 +155,7 @@ export default function ProcessPage() {
   };
 
   return (
-    <div className="process-page">
-      <h1>Process Contacts</h1>
-      <p className="page-description">
-        Upload Excel files and configure filtering options to process your contact lists.
-      </p>
-
+    <div className={`process-page ${showProcessingPanel ? 'with-processing-bar' : ''}`}>
       {showProcessingPanel && (
         <ProcessingSidePanel
           status={processingStatus}
@@ -153,9 +163,22 @@ export default function ProcessPage() {
           onClose={() => setShowProcessingPanel(false)}
         />
       )}
+      
+      <h1>Process Contacts</h1>
+      <p className="page-description">
+        Upload Excel files and configure filtering options to process your contact lists.
+      </p>
 
       <div className="process-layout">
         <div className="process-left">
+          <div className="process-file-options">
+            <button
+              className="process-processed-files-button"
+              onClick={() => setShowProcessedFilesModal(true)}
+            >
+              📋 Use Previously Processed File
+            </button>
+          </div>
           <PreviousFilesSelector
             selectedFileIds={selectedPreviousFileIds}
             onSelectionChange={setSelectedPreviousFileIds}
@@ -176,6 +199,12 @@ export default function ProcessPage() {
           />
         </div>
       </div>
+
+      <ProcessedFilesModal
+        isOpen={showProcessedFilesModal}
+        onClose={() => setShowProcessedFilesModal(false)}
+        onSelectFile={handleProcessedFileSelected}
+      />
     </div>
   );
 }

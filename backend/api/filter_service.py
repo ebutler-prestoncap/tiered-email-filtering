@@ -36,7 +36,8 @@ class FilterService:
         self,
         uploaded_files: list,
         settings: Dict[str, Any],
-        job_id: str
+        job_id: str,
+        original_filenames: list = None
     ) -> Dict[str, Any]:
         """
         Process contacts with given settings.
@@ -45,6 +46,7 @@ class FilterService:
             uploaded_files: List of file paths to process
             settings: Configuration settings dict
             job_id: Job ID for output filename
+            original_filenames: List of original filenames (for display in analytics)
             
         Returns:
             Dict with output_path and analytics
@@ -52,7 +54,7 @@ class FilterService:
         # Configure filter instance
         self.filter.enable_firm_exclusion = settings.get("firmExclusion", False)
         self.filter.enable_contact_inclusion = settings.get("contactInclusion", False)
-        self.filter.enable_find_emails = settings.get("findEmails", False)
+        self.filter.enable_find_emails = settings.get("findEmails", True)
         self.filter.tier1_limit = settings.get("tier1Limit", 10)
         self.filter.tier2_limit = settings.get("tier2Limit", 6)
         
@@ -107,13 +109,21 @@ class FilterService:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_filename = f"{user_prefix}_{timestamp}.xlsx"
             
+            # Create mapping from UUID filenames to original filenames
+            filename_mapping = {}
+            if original_filenames and len(original_filenames) == len(uploaded_files):
+                for uuid_path, original_name in zip(uploaded_files, original_filenames):
+                    uuid_filename = Path(uuid_path).name
+                    filename_mapping[uuid_filename] = original_name
+            
             # Call the main processing method
             # We need to replicate the process_contacts logic but extract analytics
             result = self._process_with_analytics(
                 settings=settings,
                 include_all_firms=include_all_firms,
                 user_prefix=user_prefix,
-                output_filename=output_filename
+                output_filename=output_filename,
+                filename_mapping=filename_mapping
             )
             
             return result
@@ -224,7 +234,8 @@ class FilterService:
         settings: Dict[str, Any],
         include_all_firms: bool,
         user_prefix: str,
-        output_filename: str
+        output_filename: str,
+        filename_mapping: Dict[str, str] = None
     ) -> Dict[str, Any]:
         """Process contacts and extract analytics"""
         # Clean output folder
@@ -232,6 +243,14 @@ class FilterService:
         
         # Load and combine input files
         combined_df, file_info = self.filter.load_and_combine_input_files()
+        
+        # Map UUID filenames to original filenames for display
+        if filename_mapping:
+            for info in file_info:
+                uuid_filename = info.get('file', '')
+                if uuid_filename in filename_mapping:
+                    info['file'] = filename_mapping[uuid_filename]
+                    logger.info(f"Mapped file name: {uuid_filename} -> {filename_mapping[uuid_filename]}")
         
         # Standardize columns
         standardized_df = self.filter.standardize_columns(combined_df)
@@ -272,6 +291,41 @@ class FilterService:
                 excluded_count = len(deduplicated_df) - len(deduplicated_df[mask])
                 deduplicated_df = deduplicated_df[mask].copy()
                 logger.info(f"Excluded {excluded_count} contacts from exclusion list")
+        
+        # Apply field filters (country, city, asset class, firm type, etc.)
+        field_filters = settings.get("fieldFilters", [])
+        if field_filters:
+            logger.info(f"Applying {len(field_filters)} field filters to {len(deduplicated_df)} contacts")
+            initial_count = len(deduplicated_df)
+            
+            for field_filter in field_filters:
+                field_name = field_filter.get("field", "")
+                filter_values = field_filter.get("values", [])
+                
+                if not field_name or field_name not in deduplicated_df.columns:
+                    logger.warning(f"Field '{field_name}' not found in data, skipping filter")
+                    continue
+                
+                if not filter_values:
+                    # Empty values list means no filter (include all)
+                    continue
+                
+                # Normalize filter values for case-insensitive matching
+                normalized_filter_values = {str(v).lower().strip() for v in filter_values if v}
+                
+                def matches_field_filter(row):
+                    field_value = str(row.get(field_name, '')).lower().strip()
+                    return field_value in normalized_filter_values
+                
+                mask = deduplicated_df.apply(matches_field_filter, axis=1)
+                filtered_count = mask.sum()
+                deduplicated_df = deduplicated_df[mask].copy()
+                logger.info(f"Field filter '{field_name}': {filtered_count} contacts match {len(filter_values)} values")
+            
+            final_count = len(deduplicated_df)
+            excluded_by_fields = initial_count - final_count
+            if excluded_by_fields > 0:
+                logger.info(f"Field filters excluded {excluded_by_fields} contacts ({initial_count} -> {final_count})")
         
         # Apply tier filtering - use custom configs if provided, otherwise defaults
         tier1_filters = settings.get("tier1Filters")

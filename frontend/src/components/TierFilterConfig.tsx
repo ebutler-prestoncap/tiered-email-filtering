@@ -157,10 +157,10 @@ export default function TierFilterConfigComponent({
             checked={config.requireInvestmentTeam}
             onChange={(e) => onChange({ ...config, requireInvestmentTeam: e.target.checked })}
           />
-          <span>Require Investment Team Role</span>
+          <span>Require investment team and portfolio management role</span>
         </label>
         <p className="filter-hint">
-          If checked, contacts must have "investment team" or "investment" in their ROLE field
+          If checked, contacts must have "investment team" or "investment" AND "portfolio management" or "portfolio" in their ROLE field
         </p>
       </div>
     </div>

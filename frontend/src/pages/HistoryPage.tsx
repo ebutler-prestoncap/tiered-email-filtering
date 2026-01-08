@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listJobs, deleteJob } from '../services/api';
 import type { Job } from '../types';
+import { formatDateTimePacific } from '../utils/dateUtils';
 import './HistoryPage.css';
 
 export default function HistoryPage() {
@@ -40,10 +41,6 @@ export default function HistoryPage() {
     }
   };
 
-  const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleString();
-  };
 
   if (loading) {
     return <div className="history-page">Loading...</div>;
@@ -88,7 +85,7 @@ export default function HistoryPage() {
                 </button>
               </div>
               <div className="job-content">
-                <div className="job-date">{formatDate(job.created_at)}</div>
+                <div className="job-date">{formatDateTimePacific(job.created_at)}</div>
                 <div className="job-files">
                   {job.input_files.length} file{job.input_files.length !== 1 ? 's' : ''}
                 </div>

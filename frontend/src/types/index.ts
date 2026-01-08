@@ -8,6 +8,11 @@ export interface TierFilterConfig {
   requireInvestmentTeam: boolean;  // Whether investment team role is required
 }
 
+export interface FieldFilter {
+  field: string;  // Column name (e.g., 'COUNTRY', 'CITY', 'ASSET_CLASS', 'FIRM_TYPE')
+  values: string[];  // List of values to include (empty means no filter)
+}
+
 export interface ProcessingSettings {
   includeAllFirms: boolean;
   findEmails: boolean;
@@ -24,6 +29,7 @@ export interface ProcessingSettings {
   firmInclusionList?: string;  // Inline list of firms to include (newline-separated)
   contactExclusionList?: string;  // Inline list of contacts to exclude (format: Name|Firm, newline-separated)
   contactInclusionList?: string;  // Inline list of contacts to include (format: Name|Firm, newline-separated)
+  fieldFilters?: FieldFilter[];  // Field-based filters (country, city, asset class, firm type, etc.)
 }
 
 export interface SettingsPreset {

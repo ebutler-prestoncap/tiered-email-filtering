@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { listUploadedFiles } from '../services/api';
+import { formatDateTimePacific } from '../utils/dateUtils';
 import './PreviousFilesSelector.css';
 
 interface UploadedFile {
@@ -9,6 +10,7 @@ interface UploadedFile {
   fileSize: number;
   uploadedAt: string;
   lastUsedAt: string | null;
+  fileExists?: boolean;
 }
 
 interface PreviousFilesSelectorProps {
@@ -53,10 +55,6 @@ export default function PreviousFilesSelector({ selectedFileIds, onSelectionChan
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
-  const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
 
   return (
     <div className="previous-files-selector">
@@ -84,19 +82,36 @@ export default function PreviousFilesSelector({ selectedFileIds, onSelectionChan
           ) : (
             <div className="selector-list">
               {files.map((file) => (
-                <label key={file.id} className="selector-item">
+                <label 
+                  key={file.id} 
+                  className={`selector-item ${file.fileExists === false ? 'file-processed' : ''}`}
+                >
                   <input
                     type="checkbox"
                     checked={selectedFileIds.includes(file.id)}
                     onChange={() => handleToggleFile(file.id)}
+                    disabled={file.fileExists === false}
                     className="selector-checkbox"
                   />
                   <div className="selector-item-content">
-                    <div className="selector-item-name">{file.originalName}</div>
+                    <div className="selector-item-name">
+                      {file.originalName}
+                      {file.fileExists === false && (
+                        <span className="file-processed-badge" title="File has been processed and is no longer available for reprocessing">
+                          (Processed)
+                        </span>
+                      )}
+                    </div>
                     <div className="selector-item-meta">
                       <span>{formatFileSize(file.fileSize)}</span>
                       <span className="selector-item-separator">•</span>
-                      <span>{formatDate(file.uploadedAt)}</span>
+                      <span>{formatDateTimePacific(file.uploadedAt)}</span>
+                      {file.lastUsedAt && (
+                        <>
+                          <span className="selector-item-separator">•</span>
+                          <span>Last used: {formatDateTimePacific(file.lastUsedAt)}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </label>

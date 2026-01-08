@@ -996,9 +996,11 @@ class TieredFilter:
             if exclusion_regex.search(job_title):
                 continue
             
-            # Check investment team requirement (only for Tier 2)
+            # Check investment team and portfolio management requirement
             if tier_config['require_investment_team']:
-                if 'investment team' not in role and 'investment' not in role:
+                has_investment = 'investment team' in role or 'investment' in role
+                has_portfolio = 'portfolio management' in role or 'portfolio' in role
+                if not (has_investment and has_portfolio):
                     continue
             
             # Calculate priority score

@@ -114,7 +114,7 @@ class Database:
         
         default_settings = {
             "includeAllFirms": False,  # --include-all-firms flag (default: False)
-            "findEmails": False,  # --find-emails flag (default: False)
+            "findEmails": True,  # --find-emails flag (default: True)
             "firmExclusion": False,  # enable_firm_exclusion (default: False)
             "contactInclusion": False,  # enable_contact_inclusion (default: False)
             "tier1Limit": 10,  # tier1_limit (default: 10)
@@ -139,7 +139,8 @@ class Database:
             "firmExclusionList": "",
             "firmInclusionList": "",
             "contactExclusionList": "",
-            "contactInclusionList": ""
+            "contactInclusionList": "",
+            "fieldFilters": []
         }
         
         # Check if default preset exists
@@ -438,9 +439,9 @@ class Database:
         files = []
         for row in cursor.fetchall():
             file_dict = dict(row)
-            # Check if file still exists
-            if Path(file_dict["stored_path"]).exists():
-                files.append(file_dict)
+            # Include file even if it's been deleted (for history/reference)
+            # The file may have been processed and cleaned up, but metadata is still useful
+            files.append(file_dict)
         
         conn.close()
         return files

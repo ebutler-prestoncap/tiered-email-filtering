@@ -9,11 +9,11 @@ interface ProcessingSidePanelProps {
 
 export default function ProcessingSidePanel({ status, jobId, onClose }: ProcessingSidePanelProps) {
   useEffect(() => {
-    // Auto-close after 3 seconds if completed
+    // Auto-close after 5 seconds if completed
     if (status === 'completed' && onClose) {
       const timer = setTimeout(() => {
         onClose();
-      }, 3000);
+      }, 5000);
       return () => clearTimeout(timer);
     }
   }, [status, onClose]);
@@ -35,32 +35,34 @@ export default function ProcessingSidePanel({ status, jobId, onClose }: Processi
   };
 
   return (
-    <div className={`processing-side-panel ${status}`}>
-      <div className="panel-header">
-        <div className="status-content">
-          <span className="status-icon">{statusIcons[status]}</span>
-          <span className="status-message">{statusMessages[status]}</span>
+    <div className={`processing-bar ${status}`}>
+      <div className="processing-bar-content">
+        <div className="processing-bar-left">
+          <span className="processing-bar-icon">{statusIcons[status]}</span>
+          <span className="processing-bar-message">{statusMessages[status]}</span>
+          {status === 'processing' && (
+            <div className="processing-bar-progress">
+              <div className="processing-bar-progress-fill"></div>
+            </div>
+          )}
         </div>
-        {onClose && (
-          <button className="panel-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        )}
+        <div className="processing-bar-right">
+          {status === 'completed' && (
+            <a href={`/analytics/${jobId}`} className="processing-bar-link">
+              View Analytics →
+            </a>
+          )}
+          {onClose && (
+            <button 
+              className="processing-bar-close" 
+              onClick={onClose} 
+              aria-label="Close"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
-      
-      {status === 'processing' && (
-        <div className="status-progress">
-          <div className="progress-bar"></div>
-        </div>
-      )}
-      
-      {status === 'completed' && (
-        <div className="panel-actions">
-          <a href={`/analytics/${jobId}`} className="status-link">
-            View Analytics →
-          </a>
-        </div>
-      )}
     </div>
   );
 }
