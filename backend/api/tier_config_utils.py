@@ -114,7 +114,8 @@ def get_default_tier2_keywords() -> Dict[str, List[str]]:
             'director', 'associate director',
             'vice president', 'investment analyst', 'research analyst',
             'portfolio analyst', 'senior analyst', 'investment advisor',
-            'principal', 'associate', 'coordinator', 'specialist', 'advisor', 'analyst'
+            'principal', 'associate', 'coordinator', 'specialist', 'advisor', 'analyst',
+            'chief finance officer'
         ],
         'exclude': [
             'operations', 'operation', 'hr', 'human resources', 'human resource',
@@ -136,7 +137,8 @@ def get_default_tier3_keywords() -> Dict[str, List[str]]:
             'coo', 'chief operating', 'president', 'chairman', 'chair',
             'director', 'partner', 'vice president',
             'manager', 'head of',
-            'analyst', 'associate'
+            'analyst', 'associate',
+            'founder'
         ],
         'exclude': []
     }

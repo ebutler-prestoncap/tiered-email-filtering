@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getJob, downloadResults } from '../services/api';
+import { getJob, downloadResults, createPreset } from '../services/api';
 import type { Job } from '../types';
 import './AnalyticsPage.css';
 
@@ -10,6 +10,10 @@ export default function AnalyticsPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showPresetModal, setShowPresetModal] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetSaveMessage, setPresetSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (jobId) {
@@ -245,7 +249,7 @@ export default function AnalyticsPage() {
 
   const handleExportExcludedFirms = () => {
     if (!jobId || !analytics?.excluded_firms_list || analytics.excluded_firms_list.length === 0) return;
-    
+
     try {
       const csvContent = [
         'Firm Name',
@@ -257,7 +261,7 @@ export default function AnalyticsPage() {
           return firm;
         })
       ].join('\n');
-      
+
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -277,6 +281,29 @@ export default function AnalyticsPage() {
     }
   };
 
+  const handleSaveAsPreset = async () => {
+    if (!job?.settings || !presetName.trim()) return;
+
+    setSavingPreset(true);
+    setPresetSaveMessage(null);
+
+    try {
+      await createPreset(presetName.trim(), job.settings);
+      setPresetSaveMessage({ type: 'success', text: `Preset "${presetName.trim()}" saved successfully!` });
+      setPresetName('');
+      setShowPresetModal(false);
+      // Clear success message after 3 seconds
+      setTimeout(() => setPresetSaveMessage(null), 3000);
+    } catch (err) {
+      setPresetSaveMessage({ type: 'error', text: 'Failed to save preset. Please try again.' });
+      if (import.meta.env.DEV) {
+        console.error('Save preset error:', err);
+      }
+    } finally {
+      setSavingPreset(false);
+    }
+  };
+
   return (
     <div className="analytics-page">
       <div className="analytics-header">
@@ -284,12 +311,67 @@ export default function AnalyticsPage() {
           ← Back to History
         </button>
         <h1>Analytics</h1>
-        {job.status === 'completed' && (
-          <button className="download-button" onClick={handleDownload}>
-            Download Excel
-          </button>
-        )}
+        <div className="header-actions">
+          {job.status === 'completed' && (
+            <>
+              <button className="save-preset-button" onClick={() => setShowPresetModal(true)}>
+                Save as Preset
+              </button>
+              <button className="download-button" onClick={handleDownload}>
+                Download Excel
+              </button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Preset Save Modal */}
+      {showPresetModal && (
+        <div className="modal-overlay" onClick={() => setShowPresetModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>Save Filter as Preset</h3>
+            <p>Save the current filter configuration as a reusable preset.</p>
+            <input
+              type="text"
+              className="preset-name-input"
+              placeholder="Enter preset name"
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && presetName.trim()) {
+                  handleSaveAsPreset();
+                }
+              }}
+              autoFocus
+            />
+            <div className="modal-actions">
+              <button
+                className="cancel-button"
+                onClick={() => {
+                  setShowPresetModal(false);
+                  setPresetName('');
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="save-button"
+                onClick={handleSaveAsPreset}
+                disabled={!presetName.trim() || savingPreset}
+              >
+                {savingPreset ? 'Saving...' : 'Save Preset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preset Save Message */}
+      {presetSaveMessage && (
+        <div className={`preset-message ${presetSaveMessage.type}`}>
+          {presetSaveMessage.text}
+        </div>
+      )}
 
       {summary && (
         <div className="analytics-content">
