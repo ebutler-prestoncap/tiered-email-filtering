@@ -509,7 +509,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0;
+  gap: var(--spacing-xs);
   flex-wrap: wrap;
   padding: var(--spacing-lg) 0;
 }
@@ -517,6 +517,7 @@
 .pipeline-stage {
   display: flex;
   align-items: center;
+  gap: var(--spacing-xs);
 }
 
 .stage-box {
@@ -570,8 +571,9 @@
 .stage-arrow {
   font-size: 24px;
   color: var(--color-text-secondary);
-  padding: 0 var(--spacing-sm);
+  padding: 0 var(--spacing-xs);
   opacity: 0.5;
+  flex-shrink: 0;
 }
 
 /* Stage-specific colors */
@@ -676,16 +678,17 @@
 @media (max-width: 768px) {
   .pipeline-flow {
     flex-direction: column;
-    gap: var(--spacing-md);
+    gap: var(--spacing-sm);
   }
 
   .pipeline-stage {
     flex-direction: column;
+    gap: var(--spacing-sm);
   }
 
   .stage-arrow {
     transform: rotate(90deg);
-    padding: var(--spacing-xs) 0;
+    padding: 0;
   }
 
   .stage-box {
