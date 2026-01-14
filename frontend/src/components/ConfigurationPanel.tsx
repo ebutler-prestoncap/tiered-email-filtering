@@ -70,11 +70,15 @@ export default function ConfigurationPanel({
           contactExclusionList: '',
           contactInclusionList: '',
           fieldFilters: [],
+          separateByFirmType: false,
         };
         onSettingsChange(fallbackSettings);
       }
     } catch (error) {
-      console.error('Failed to load presets:', error);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Failed to load presets:', error);
+      }
       // Fallback to hardcoded defaults on error
       const fallbackSettings: ProcessingSettings = {
         includeAllFirms: false,
@@ -105,6 +109,7 @@ export default function ConfigurationPanel({
           contactExclusionList: '',
           contactInclusionList: '',
           fieldFilters: [],
+          separateByFirmType: false,
         };
         onSettingsChange(fallbackSettings);
     }
@@ -243,6 +248,18 @@ export default function ConfigurationPanel({
             <span>Contact Inclusion</span>
           </label>
           <p className="config-hint">Force specific contacts through filters</p>
+        </div>
+
+        <div className="config-section">
+          <label className="config-toggle">
+            <input
+              type="checkbox"
+              checked={settings.separateByFirmType || false}
+              onChange={(e) => updateSetting('separateByFirmType', e.target.checked)}
+            />
+            <span>Separate by Firm Type</span>
+          </label>
+          <p className="config-hint">Generate 6 separate output files by firm type: Insurance, Wealth/Family Office, Endowments/Foundations, Pension Funds, Funds of Funds, Other</p>
         </div>
       </div>
 

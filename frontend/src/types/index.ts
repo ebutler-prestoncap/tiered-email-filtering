@@ -30,6 +30,7 @@ export interface ProcessingSettings {
   contactExclusionList?: string;  // Inline list of contacts to exclude (format: Name|Firm, newline-separated)
   contactInclusionList?: string;  // Inline list of contacts to include (format: Name|Firm, newline-separated)
   fieldFilters?: FieldFilter[];  // Field-based filters (country, city, asset class, firm type, etc.)
+  separateByFirmType?: boolean;  // Split output into separate files by firm type groups
 }
 
 export interface SettingsPreset {
@@ -43,7 +44,7 @@ export interface SettingsPreset {
 export interface Job {
   id: string;
   created_at: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
   settings: ProcessingSettings;
   input_files: string[];
   output_filename?: string;
