@@ -140,6 +140,28 @@
   background-color: var(--color-border);
 }
 
+.preset-set-default {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background-color: transparent;
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.preset-set-default:hover {
+  background-color: var(--color-accent);
+  color: white;
+}
+
+.preset-card.default-preset {
+  border-color: var(--color-accent);
+  border-width: 2px;
+}
+
 .preset-delete {
   width: 24px;
   height: 24px;

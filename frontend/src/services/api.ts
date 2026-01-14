@@ -135,9 +135,17 @@ export const updatePreset = async (
 
 export const deletePreset = async (presetId: string): Promise<void> => {
   const response = await api.delete<{ success: boolean }>(`/settings/presets/${presetId}`);
-  
+
   if (!response.data.success) {
     throw new Error('Failed to delete preset');
+  }
+};
+
+export const setDefaultPreset = async (presetId: string): Promise<void> => {
+  const response = await api.post<{ success: boolean }>(`/settings/presets/${presetId}/default`);
+
+  if (!response.data.success) {
+    throw new Error('Failed to set default preset');
   }
 };
 

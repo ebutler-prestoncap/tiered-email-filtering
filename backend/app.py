@@ -747,6 +747,21 @@ def delete_preset(preset_id: str):
         logger.error(f"Delete preset error: {e}", exc_info=True)
         return jsonify({"success": False, "error": "Failed to delete preset"}), 500
 
+
+@app.route('/api/settings/presets/<preset_id>/default', methods=['POST'])
+def set_default_preset(preset_id: str):
+    """Set a preset as the default"""
+    try:
+        success = db.set_default_preset(preset_id)
+        if success:
+            return jsonify({"success": True}), 200
+        else:
+            return jsonify({"success": False, "error": "Preset not found"}), 404
+    except Exception as e:
+        logger.error(f"Set default preset error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to set default preset"}), 500
+
+
 @app.route('/api/files', methods=['GET'])
 def list_uploaded_files():
     """List all previously uploaded files"""

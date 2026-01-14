@@ -539,15 +539,12 @@ class Database:
         def _update_preset(conn):
             cursor = conn.cursor()
             
-            # Check if it's the default preset
+            # Check if preset exists
             cursor.execute("SELECT is_default FROM settings_presets WHERE id = ?", (preset_id,))
             row = cursor.fetchone()
             if not row:
                 return False
-            
-            if row["is_default"]:
-                return False  # Cannot update default preset
-            
+
             # Build update query
             updates = []
             params = []
@@ -602,7 +599,35 @@ class Database:
         except Exception as e:
             logger.error(f"Failed to delete preset {preset_id}: {e}")
             raise
-    
+
+    def set_default_preset(self, preset_id: str) -> bool:
+        """Set a preset as the default (unsets current default)"""
+        def _set_default(conn):
+            cursor = conn.cursor()
+
+            # Check if preset exists
+            cursor.execute("SELECT id FROM settings_presets WHERE id = ?", (preset_id,))
+            if not cursor.fetchone():
+                return False
+
+            # Unset current default
+            cursor.execute("UPDATE settings_presets SET is_default = 0 WHERE is_default = 1")
+
+            # Set new default
+            cursor.execute("UPDATE settings_presets SET is_default = 1 WHERE id = ?", (preset_id,))
+
+            return cursor.rowcount > 0
+
+        try:
+            with self.get_connection() as conn:
+                success = self._execute_with_retry(lambda: _set_default(conn))
+            if success:
+                logger.info(f"Set default preset: {preset_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Failed to set default preset {preset_id}: {e}")
+            raise
+
     def save_uploaded_file(self, file_id: str, original_name: str, stored_path: str, file_size: int) -> None:
         """Save uploaded file metadata"""
         def _save_file(conn):
