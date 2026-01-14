@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getPresets, createPreset, updatePreset, deletePreset, setDefaultPreset } from '../services/api';
 import type { SettingsPreset, ProcessingSettings } from '../types';
 import FieldFilters from '../components/FieldFilters';
+import ListInput from '../components/ListInput';
 import RemovalListManager from '../components/RemovalListManager';
 import './SettingsPage.css';
 
@@ -199,6 +200,16 @@ export default function SettingsPage() {
                   </div>
                   <div className="edit-setting">
                     <label>
+                      <input
+                        type="checkbox"
+                        checked={editSettings?.separateByFirmType || false}
+                        onChange={(e) => setEditSettings(prev => prev ? { ...prev, separateByFirmType: e.target.checked } : null)}
+                      />
+                      Separate by Firm Type
+                    </label>
+                  </div>
+                  <div className="edit-setting">
+                    <label>
                       Tier 1 Limit:
                       <input
                         type="number"
@@ -244,6 +255,37 @@ export default function SettingsPage() {
                       />
                     </label>
                   </div>
+                </div>
+                <div className="edit-lists-section">
+                  <h5>Firm & Contact Lists</h5>
+                  <ListInput
+                    label="Firm Exclusion List"
+                    value={editSettings?.firmExclusionList || ''}
+                    onChange={(value) => setEditSettings(prev => prev ? { ...prev, firmExclusionList: value } : null)}
+                    placeholder="Enter firm names to exclude, one per line"
+                    hint="One firm name per line. These firms will be excluded."
+                  />
+                  <ListInput
+                    label="Firm Inclusion List"
+                    value={editSettings?.firmInclusionList || ''}
+                    onChange={(value) => setEditSettings(prev => prev ? { ...prev, firmInclusionList: value } : null)}
+                    placeholder="Enter firm names to include, one per line"
+                    hint="One firm name per line. Only these firms will be processed."
+                  />
+                  <ListInput
+                    label="Contact Exclusion List"
+                    value={editSettings?.contactExclusionList || ''}
+                    onChange={(value) => setEditSettings(prev => prev ? { ...prev, contactExclusionList: value } : null)}
+                    placeholder="Enter contacts to exclude (Name|Firm), one per line"
+                    hint="Format: Name|Firm per line. These contacts will be excluded."
+                  />
+                  <ListInput
+                    label="Contact Inclusion List"
+                    value={editSettings?.contactInclusionList || ''}
+                    onChange={(value) => setEditSettings(prev => prev ? { ...prev, contactInclusionList: value } : null)}
+                    placeholder="Enter contacts to include (Name|Firm), one per line"
+                    hint="Format: Name|Firm per line. These contacts will bypass filters."
+                  />
                 </div>
                 <div className="edit-field-filters">
                   <FieldFilters
@@ -393,6 +435,16 @@ export default function SettingsPage() {
                       </div>
                       <div className="edit-setting">
                         <label>
+                          <input
+                            type="checkbox"
+                            checked={editSettings?.separateByFirmType || false}
+                            onChange={(e) => setEditSettings(prev => prev ? { ...prev, separateByFirmType: e.target.checked } : null)}
+                          />
+                          Separate by Firm Type
+                        </label>
+                      </div>
+                      <div className="edit-setting">
+                        <label>
                           Tier 1 Limit:
                           <input
                             type="number"
@@ -438,6 +490,37 @@ export default function SettingsPage() {
                           />
                         </label>
                       </div>
+                    </div>
+                    <div className="edit-lists-section">
+                      <h5>Firm & Contact Lists</h5>
+                      <ListInput
+                        label="Firm Exclusion List"
+                        value={editSettings?.firmExclusionList || ''}
+                        onChange={(value) => setEditSettings(prev => prev ? { ...prev, firmExclusionList: value } : null)}
+                        placeholder="Enter firm names to exclude, one per line"
+                        hint="One firm name per line. These firms will be excluded."
+                      />
+                      <ListInput
+                        label="Firm Inclusion List"
+                        value={editSettings?.firmInclusionList || ''}
+                        onChange={(value) => setEditSettings(prev => prev ? { ...prev, firmInclusionList: value } : null)}
+                        placeholder="Enter firm names to include, one per line"
+                        hint="One firm name per line. Only these firms will be processed."
+                      />
+                      <ListInput
+                        label="Contact Exclusion List"
+                        value={editSettings?.contactExclusionList || ''}
+                        onChange={(value) => setEditSettings(prev => prev ? { ...prev, contactExclusionList: value } : null)}
+                        placeholder="Enter contacts to exclude (Name|Firm), one per line"
+                        hint="Format: Name|Firm per line. These contacts will be excluded."
+                      />
+                      <ListInput
+                        label="Contact Inclusion List"
+                        value={editSettings?.contactInclusionList || ''}
+                        onChange={(value) => setEditSettings(prev => prev ? { ...prev, contactInclusionList: value } : null)}
+                        placeholder="Enter contacts to include (Name|Firm), one per line"
+                        hint="Format: Name|Firm per line. These contacts will bypass filters."
+                      />
                     </div>
                     <div className="edit-field-filters">
                       <FieldFilters
