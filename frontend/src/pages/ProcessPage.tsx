@@ -12,6 +12,14 @@ import './ProcessPage.css';
 // Store file validations in a map keyed by file name + size
 type FileValidationMap = Map<string, FileValidationResult>;
 
+// Info about a previous file
+interface PreviousFileInfo {
+  id: string;
+  originalName: string;
+  fileSize: number;
+  validation?: FileValidationResult;
+}
+
 const getFileKey = (file: File | { name: string; size: number }): string => {
   return `${file.name}-${file.size}`;
 };
@@ -21,6 +29,7 @@ export default function ProcessPage() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [fileValidations, setFileValidations] = useState<FileValidationMap>(new Map());
   const [selectedPreviousFileIds, setSelectedPreviousFileIds] = useState<string[]>([]);
+  const [previousFileInfo, setPreviousFileInfo] = useState<Map<string, PreviousFileInfo>>(new Map());
   const [showProcessingPanel, setShowProcessingPanel] = useState(false);
   // Initialize with default values - ConfigurationPanel will update with preset
   const [settings, setSettings] = useState<ProcessingSettings>({
@@ -148,6 +157,41 @@ export default function ProcessPage() {
   const getFileValidation = useCallback((file: File): FileValidationResult | undefined => {
     return fileValidations.get(getFileKey(file));
   }, [fileValidations]);
+
+  // Handle validation results from previous files selector
+  const handlePreviousFileValidated = useCallback((
+    fileId: string,
+    validation: FileValidationResult,
+    fileInfo: { id: string; originalName: string; fileSize: number }
+  ) => {
+    setPreviousFileInfo(prev => {
+      const newMap = new Map(prev);
+      newMap.set(fileId, {
+        id: fileInfo.id,
+        originalName: fileInfo.originalName,
+        fileSize: fileInfo.fileSize,
+        validation
+      });
+      return newMap;
+    });
+  }, []);
+
+  // Get selected previous files with their info
+  const selectedPreviousFiles = selectedPreviousFileIds
+    .map(id => previousFileInfo.get(id))
+    .filter((info): info is PreviousFileInfo => info !== undefined);
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  const handleRemovePreviousFile = (fileId: string) => {
+    setSelectedPreviousFileIds(prev => prev.filter(id => id !== fileId));
+  };
 
   // Auto-update prefix when files or previous file selection changes
   useEffect(() => {
@@ -291,6 +335,7 @@ export default function ProcessPage() {
           <PreviousFilesSelector
             selectedFileIds={selectedPreviousFileIds}
             onSelectionChange={setSelectedPreviousFileIds}
+            onFileValidated={handlePreviousFileValidated}
           />
           <FileUpload
             onFilesSelected={handleFilesSelected}
@@ -298,6 +343,49 @@ export default function ProcessPage() {
             onRemoveFile={handleRemoveFile}
             getFileValidation={getFileValidation}
           />
+
+          {/* Show selected previous files */}
+          {selectedPreviousFiles.length > 0 && (
+            <div className="selected-previous-files">
+              <h3>Selected Previous Files ({selectedPreviousFiles.length})</h3>
+              <div className="file-list">
+                {selectedPreviousFiles.map((fileInfo) => (
+                  <div key={fileInfo.id} className="file-item previous-file">
+                    <div className="file-info-content">
+                      <span className="file-name">{fileInfo.originalName}</span>
+                      <span className="file-size">{formatFileSize(fileInfo.fileSize)}</span>
+                      {fileInfo.validation && (
+                        <div className="file-validation-badges">
+                          {fileInfo.validation.contacts_sheet && (
+                            <span className="validation-badge contacts">
+                              ✓ Contacts
+                            </span>
+                          )}
+                          {fileInfo.validation.accounts_sheet && (
+                            <span className="validation-badge accounts">
+                              ✓ Accounts
+                            </span>
+                          )}
+                          {fileInfo.validation.can_merge_aum && (
+                            <span className="validation-badge aum">
+                              ✓ AUM
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      className="file-remove"
+                      onClick={() => handleRemovePreviousFile(fileInfo.id)}
+                      aria-label="Remove file"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="process-right">

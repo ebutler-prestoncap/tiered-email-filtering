@@ -243,3 +243,13 @@
   cursor: not-allowed;
 }
 
+/* Loading state */
+.config-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2xl);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import type { ProcessingSettings, SettingsPreset, TierFilterConfig } from '../types';
-import { getPresets, createPreset, updatePreset } from '../services/api';
+import type { ProcessingSettings, SettingsPreset } from '../types';
+import { getPresets, createPreset, updatePreset, getActiveRemovalLists, type ActiveRemovalLists } from '../services/api';
 import TierFilterConfigComponent from './TierFilterConfig';
 import ListInput from './ListInput';
 import FieldFilters from './FieldFilters';
@@ -24,12 +24,34 @@ export default function ConfigurationPanel({
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [savePresetName, setSavePresetName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingPresets, setIsLoadingPresets] = useState(true);
+  const [activeLists, setActiveLists] = useState<ActiveRemovalLists>({ accountRemovalList: null, contactRemovalList: null });
 
   useEffect(() => {
     loadPresets();
+    loadActiveRemovalLists();
   }, []);
 
+  const loadActiveRemovalLists = async () => {
+    try {
+      const lists = await getActiveRemovalLists();
+      setActiveLists(lists);
+      // Set default toggle values based on whether lists exist
+      if (lists.accountRemovalList && settings.applyAccountRemovalList === undefined) {
+        onSettingsChange({ ...settings, applyAccountRemovalList: true });
+      }
+      if (lists.contactRemovalList && settings.applyContactRemovalList === undefined) {
+        onSettingsChange({ ...settings, applyContactRemovalList: true });
+      }
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error('Failed to load active removal lists:', error);
+      }
+    }
+  };
+
   const loadPresets = async () => {
+    setIsLoadingPresets(true);
     try {
       const loadedPresets = await getPresets();
       setPresets(loadedPresets);
@@ -37,7 +59,6 @@ export default function ConfigurationPanel({
       if (defaultPreset) {
         setSelectedPresetId(defaultPreset.id);
         // Always set default preset on load
-        console.log('Loading default preset:', defaultPreset.settings);
         onSettingsChange(defaultPreset.settings);
       } else {
         // Fallback to hardcoded defaults if no preset found
@@ -112,6 +133,8 @@ export default function ConfigurationPanel({
           separateByFirmType: false,
         };
         onSettingsChange(fallbackSettings);
+    } finally {
+      setIsLoadingPresets(false);
     }
   };
 
@@ -129,6 +152,17 @@ export default function ConfigurationPanel({
   ) => {
     onSettingsChange({ ...settings, [key]: value });
   };
+
+  if (isLoadingPresets) {
+    return (
+      <div className="config-panel">
+        <h2>Configuration</h2>
+        <div className="config-loading">
+          <p>Loading settings...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="config-panel">
@@ -262,6 +296,48 @@ export default function ConfigurationPanel({
           <p className="config-hint">Generate 6 separate output files by firm type: Insurance, Wealth/Family Office, Endowments/Foundations, Pension Funds, Funds of Funds, Other</p>
         </div>
       </div>
+
+      {/* Removal Lists */}
+      {(activeLists.accountRemovalList || activeLists.contactRemovalList) && (
+        <div className="config-group">
+          <h3 className="config-group-title">Removal Lists</h3>
+          <p className="config-hint" style={{ marginBottom: 'var(--spacing-md)' }}>
+            Apply uploaded removal lists to exclude accounts or contacts from processing.
+          </p>
+
+          {activeLists.accountRemovalList && (
+            <div className="config-section">
+              <label className="config-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.applyAccountRemovalList !== false}
+                  onChange={(e) => updateSetting('applyAccountRemovalList', e.target.checked)}
+                />
+                <span>Apply Account Removal List</span>
+              </label>
+              <p className="config-hint">
+                <strong>{activeLists.accountRemovalList.originalName}</strong> ({activeLists.accountRemovalList.entryCount.toLocaleString()} accounts)
+              </p>
+            </div>
+          )}
+
+          {activeLists.contactRemovalList && (
+            <div className="config-section">
+              <label className="config-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.applyContactRemovalList !== false}
+                  onChange={(e) => updateSetting('applyContactRemovalList', e.target.checked)}
+                />
+                <span>Apply Contact Removal List</span>
+              </label>
+              <p className="config-hint">
+                <strong>{activeLists.contactRemovalList.originalName}</strong> ({activeLists.contactRemovalList.entryCount.toLocaleString()} contacts)
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Firm and Contact Lists */}
       <div className="config-group">
