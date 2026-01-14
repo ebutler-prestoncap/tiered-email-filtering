@@ -1602,6 +1602,23 @@ class FilterService:
             "total_removed": account_removal_stats.get('contacts_removed', 0) + contact_removal_stats.get('contacts_removed', 0),
         }
 
+        # Add pipeline flow statistics for visualization
+        tier3_total = len(rescued_df) if rescued_df is not None else 0
+        premier_total = premier_stats.get('premier_contacts_count', 0) if premier_stats and premier_stats.get('enabled') else 0
+        removal_total = account_removal_stats.get('contacts_removed', 0) + contact_removal_stats.get('contacts_removed', 0)
+
+        analytics["pipeline_flow"] = {
+            "input_raw": len(combined_df),
+            "after_dedup": dedup_count,
+            "after_removals": dedup_count - removal_total,
+            "after_premier": (dedup_count - removal_total - premier_total) if premier_total > 0 else None,
+            "premier_extracted": premier_total if premier_total > 0 else None,
+            "tier1_output": len(tier1_df),
+            "tier2_output": len(tier2_df),
+            "tier3_output": tier3_total,
+            "total_output": len(tier1_df) + len(tier2_df) + tier3_total + premier_total,
+        }
+
         # Check for cancellation before creating output file
         if cancel_event and cancel_event.is_set():
             raise RuntimeError("Job cancelled")
@@ -1640,11 +1657,81 @@ class FilterService:
             excel_buffer.seek(0)
             return excel_buffer
 
-        # Determine if we need to create a ZIP (when separating by firm type OR when extracting Premier)
+        # Helper function to create accounts summary sheet
+        def create_accounts_summary(all_contacts_df: pd.DataFrame) -> pd.DataFrame:
+            """Create a deduplicated accounts sheet with primary contact per firm"""
+            if len(all_contacts_df) == 0:
+                return pd.DataFrame()
+
+            # Find investor column
+            investor_col = None
+            for col in all_contacts_df.columns:
+                if col.upper() in ['INVESTOR', 'ACCOUNT', 'FIRM', 'ACCOUNT NAME']:
+                    investor_col = col
+                    break
+
+            if investor_col is None:
+                return pd.DataFrame()
+
+            # Calculate priority score for each contact if not present
+            if 'PRIORITY_SCORE' not in all_contacts_df.columns:
+                all_contacts_df = all_contacts_df.copy()
+                all_contacts_df['PRIORITY_SCORE'] = all_contacts_df.apply(
+                    lambda row: self.filter.calculate_priority_score(row) if hasattr(self.filter, 'calculate_priority_score') else 0,
+                    axis=1
+                )
+
+            # Group by firm and get the contact with highest priority score
+            accounts_list = []
+            for firm_name, group in all_contacts_df.groupby(investor_col):
+                if pd.isna(firm_name) or not str(firm_name).strip():
+                    continue
+
+                # Sort by priority score descending, then by tier (Tier 1 first)
+                sorted_group = group.sort_values('PRIORITY_SCORE', ascending=False)
+                primary_contact = sorted_group.iloc[0]
+
+                account_row = {
+                    'FIRM': firm_name,
+                    'PRIMARY_CONTACT': primary_contact.get('NAME', ''),
+                    'JOB_TITLE': primary_contact.get('JOB_TITLE', ''),
+                    'EMAIL': primary_contact.get('EMAIL', ''),
+                    'CONTACT_COUNT': len(group),
+                }
+
+                # Add AUM if available
+                if 'AUM_USD_MN' in primary_contact.index and pd.notna(primary_contact.get('AUM_USD_MN')):
+                    account_row['AUM_USD_MN'] = primary_contact.get('AUM_USD_MN')
+
+                # Add Firm Type if available
+                for col in ['FIRM TYPE', 'FIRM_TYPE', 'Firm Type']:
+                    if col in primary_contact.index and pd.notna(primary_contact.get(col)):
+                        account_row['FIRM_TYPE'] = primary_contact.get(col)
+                        break
+
+                # Add Country if available
+                if 'COUNTRY' in primary_contact.index and pd.notna(primary_contact.get('COUNTRY')):
+                    account_row['COUNTRY'] = primary_contact.get('COUNTRY')
+
+                accounts_list.append(account_row)
+
+            if not accounts_list:
+                return pd.DataFrame()
+
+            accounts_df = pd.DataFrame(accounts_list)
+            # Sort by AUM descending if available, otherwise by firm name
+            if 'AUM_USD_MN' in accounts_df.columns:
+                accounts_df = accounts_df.sort_values('AUM_USD_MN', ascending=False)
+            else:
+                accounts_df = accounts_df.sort_values('FIRM')
+
+            return accounts_df
+
+        # Determine if we need to create a ZIP (only when separating by firm type)
         has_premier = premier_df is not None and len(premier_df) > 0
 
-        if separate_by_firm_type or has_premier:
-            # Create ZIP file containing all output files
+        if separate_by_firm_type:
+            # Create ZIP file containing all output files (firm type separation)
             logger.info(f"Job {job_id}: Creating ZIP file with output files")
 
             # Build firm type breakdown for analytics
@@ -1656,155 +1743,104 @@ class FilterService:
             zip_path = self.filter.output_folder / zip_filename
 
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # Create 6 separate files by firm type
+                logger.info(f"Job {job_id}: Separating contacts by firm type into 6 files")
 
-                if separate_by_firm_type:
-                    # Create 6 separate files by firm type
-                    logger.info(f"Job {job_id}: Separating contacts by firm type into 6 files")
+                # Separate each tier by firm type
+                tier1_groups = self._separate_by_firm_type(tier1_df)
+                tier2_groups = self._separate_by_firm_type(tier2_df)
+                rescued_groups = self._separate_by_firm_type(rescued_df) if rescued_df is not None else None
 
-                    # Separate each tier by firm type
-                    tier1_groups = self._separate_by_firm_type(tier1_df)
-                    tier2_groups = self._separate_by_firm_type(tier2_df)
-                    rescued_groups = self._separate_by_firm_type(rescued_df) if rescued_df is not None else None
+                for group_name in ['Insurance', 'Wealth_FamilyOffice', 'Endowments_Foundations',
+                                   'Pension_Funds', 'Funds_of_Funds', 'Other']:
+                    # Get data for this group
+                    group_tier1 = tier1_groups.get(group_name, pd.DataFrame())
+                    group_tier2 = tier2_groups.get(group_name, pd.DataFrame())
+                    group_rescued = rescued_groups.get(group_name, pd.DataFrame()) if rescued_groups else None
 
-                    for group_name in ['Insurance', 'Wealth_FamilyOffice', 'Endowments_Foundations',
-                                       'Pension_Funds', 'Funds_of_Funds', 'Other']:
-                        # Get data for this group
-                        group_tier1 = tier1_groups.get(group_name, pd.DataFrame())
-                        group_tier2 = tier2_groups.get(group_name, pd.DataFrame())
-                        group_rescued = rescued_groups.get(group_name, pd.DataFrame()) if rescued_groups else None
+                    # Skip empty groups
+                    total_contacts = len(group_tier1) + len(group_tier2)
+                    if group_rescued is not None:
+                        total_contacts += len(group_rescued)
 
-                        # Skip empty groups
-                        total_contacts = len(group_tier1) + len(group_tier2)
-                        if group_rescued is not None:
-                            total_contacts += len(group_rescued)
+                    if total_contacts == 0:
+                        logger.info(f"Job {job_id}: Skipping empty group '{group_name}'")
+                        continue
 
-                        if total_contacts == 0:
-                            logger.info(f"Job {job_id}: Skipping empty group '{group_name}'")
-                            continue
-
-                        # Create Excel file in memory
-                        group_filename = output_filename.replace('.xlsx', f'_{group_name}.xlsx')
-                        excel_buffer = io.BytesIO()
-
-                        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                            standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE', 'AUM_USD_MN']
-
-                            # Add First Name and Last Name if they exist
-                            if len(group_tier1) > 0 and 'First Name' in group_tier1.columns:
-                                standard_columns.insert(0, 'First Name')
-                            if len(group_tier1) > 0 and 'Last Name' in group_tier1.columns:
-                                standard_columns.insert(1 if 'First Name' in standard_columns else 0, 'Last Name')
-
-                            # Write Tier 1 sheet
-                            if len(group_tier1) > 0:
-                                available_std_cols = [col for col in standard_columns if col in group_tier1.columns]
-                                other_cols = [col for col in group_tier1.columns if col not in available_std_cols]
-                                tier1_reordered = group_tier1[available_std_cols + other_cols]
-                            else:
-                                tier1_reordered = group_tier1
-                            tier1_reordered.to_excel(writer, sheet_name='Tier1_Key_Contacts', index=False)
-
-                            # Write Tier 2 sheet
-                            if len(group_tier2) > 0:
-                                available_std_cols = [col for col in standard_columns if col in group_tier2.columns]
-                                other_cols = [col for col in group_tier2.columns if col not in available_std_cols]
-                                tier2_reordered = group_tier2[available_std_cols + other_cols]
-                            else:
-                                tier2_reordered = group_tier2
-                            tier2_reordered.to_excel(writer, sheet_name='Tier2_Junior_Contacts', index=False)
-
-                            # Write Tier 3 sheet (rescued contacts)
-                            if group_rescued is not None and len(group_rescued) > 0:
-                                available_std_cols = [col for col in standard_columns if col in group_rescued.columns]
-                                other_cols = [col for col in group_rescued.columns if col not in available_std_cols]
-                                rescued_reordered = group_rescued[available_std_cols + other_cols]
-                                rescued_reordered.to_excel(writer, sheet_name='Tier3_Rescued_Contacts', index=False)
-
-                        # Add to zip
-                        excel_buffer.seek(0)
-                        zipf.writestr(group_filename, excel_buffer.read())
-                        logger.info(f"Job {job_id}: Added {group_filename} to zip (T1: {len(group_tier1)}, T2: {len(group_tier2)}, T3: {len(group_rescued) if group_rescued is not None else 0})")
-
-                        # Track file info for analytics
-                        tier3_count = len(group_rescued) if group_rescued is not None else 0
-                        files_in_zip.append({
-                            "filename": group_filename,
-                            "firmTypeGroup": group_name,
-                            "tier1Contacts": len(group_tier1),
-                            "tier2Contacts": len(group_tier2),
-                            "tier3Contacts": tier3_count,
-                            "totalContacts": total_contacts
-                        })
-
-                        # Build breakdown entry
-                        firm_type_breakdown.append({
-                            "firmTypeGroup": group_name,
-                            "displayName": group_name.replace('_', ' / ').replace('FamilyOffice', 'Family Office'),
-                            "tier1Contacts": len(group_tier1),
-                            "tier2Contacts": len(group_tier2),
-                            "tier3Contacts": tier3_count,
-                            "totalContacts": total_contacts
-                        })
-
-                    analytics["firm_type_breakdown"] = firm_type_breakdown
-                    analytics["is_separated_by_firm_type"] = True
-
-                else:
-                    # Not separating by firm type - create single tiered file
-                    logger.info(f"Job {job_id}: Creating main contacts file")
-                    main_filename = output_filename  # Keep original .xlsx name
+                    # Create Excel file in memory
+                    group_filename = output_filename.replace('.xlsx', f'_{group_name}.xlsx')
                     excel_buffer = io.BytesIO()
 
                     with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
                         standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE', 'AUM_USD_MN']
 
                         # Add First Name and Last Name if they exist
-                        if len(tier1_df) > 0 and 'First Name' in tier1_df.columns:
+                        if len(group_tier1) > 0 and 'First Name' in group_tier1.columns:
                             standard_columns.insert(0, 'First Name')
-                        if len(tier1_df) > 0 and 'Last Name' in tier1_df.columns:
+                        if len(group_tier1) > 0 and 'Last Name' in group_tier1.columns:
                             standard_columns.insert(1 if 'First Name' in standard_columns else 0, 'Last Name')
 
                         # Write Tier 1 sheet
-                        if len(tier1_df) > 0:
-                            available_std_cols = [col for col in standard_columns if col in tier1_df.columns]
-                            other_cols = [col for col in tier1_df.columns if col not in available_std_cols]
-                            tier1_reordered = tier1_df[available_std_cols + other_cols]
+                        if len(group_tier1) > 0:
+                            available_std_cols = [col for col in standard_columns if col in group_tier1.columns]
+                            other_cols = [col for col in group_tier1.columns if col not in available_std_cols]
+                            tier1_reordered = group_tier1[available_std_cols + other_cols]
                         else:
-                            tier1_reordered = tier1_df
+                            tier1_reordered = group_tier1
                         tier1_reordered.to_excel(writer, sheet_name='Tier1_Key_Contacts', index=False)
 
                         # Write Tier 2 sheet
-                        if len(tier2_df) > 0:
-                            available_std_cols = [col for col in standard_columns if col in tier2_df.columns]
-                            other_cols = [col for col in tier2_df.columns if col not in available_std_cols]
-                            tier2_reordered = tier2_df[available_std_cols + other_cols]
+                        if len(group_tier2) > 0:
+                            available_std_cols = [col for col in standard_columns if col in group_tier2.columns]
+                            other_cols = [col for col in group_tier2.columns if col not in available_std_cols]
+                            tier2_reordered = group_tier2[available_std_cols + other_cols]
                         else:
-                            tier2_reordered = tier2_df
+                            tier2_reordered = group_tier2
                         tier2_reordered.to_excel(writer, sheet_name='Tier2_Junior_Contacts', index=False)
 
                         # Write Tier 3 sheet (rescued contacts)
-                        if rescued_df is not None and len(rescued_df) > 0:
-                            available_std_cols = [col for col in standard_columns if col in rescued_df.columns]
-                            other_cols = [col for col in rescued_df.columns if col not in available_std_cols]
-                            rescued_reordered = rescued_df[available_std_cols + other_cols]
+                        if group_rescued is not None and len(group_rescued) > 0:
+                            available_std_cols = [col for col in standard_columns if col in group_rescued.columns]
+                            other_cols = [col for col in group_rescued.columns if col not in available_std_cols]
+                            rescued_reordered = group_rescued[available_std_cols + other_cols]
                             rescued_reordered.to_excel(writer, sheet_name='Tier3_Rescued_Contacts', index=False)
 
-                    excel_buffer.seek(0)
-                    zipf.writestr(main_filename, excel_buffer.read())
-                    logger.info(f"Job {job_id}: Added {main_filename} to zip")
+                        # Write Accounts Summary sheet
+                        all_group_contacts = pd.concat([group_tier1, group_tier2] + ([group_rescued] if group_rescued is not None and len(group_rescued) > 0 else []), ignore_index=True)
+                        accounts_summary = create_accounts_summary(all_group_contacts)
+                        if len(accounts_summary) > 0:
+                            accounts_summary.to_excel(writer, sheet_name='Accounts_Summary', index=False)
 
-                    # Track file info
-                    tier3_count = len(rescued_df) if rescued_df is not None else 0
+                    # Add to zip
+                    excel_buffer.seek(0)
+                    zipf.writestr(group_filename, excel_buffer.read())
+                    logger.info(f"Job {job_id}: Added {group_filename} to zip (T1: {len(group_tier1)}, T2: {len(group_tier2)}, T3: {len(group_rescued) if group_rescued is not None else 0})")
+
+                    # Track file info for analytics
+                    tier3_count = len(group_rescued) if group_rescued is not None else 0
                     files_in_zip.append({
-                        "filename": main_filename,
-                        "firmTypeGroup": "All",
-                        "tier1Contacts": len(tier1_df),
-                        "tier2Contacts": len(tier2_df),
+                        "filename": group_filename,
+                        "firmTypeGroup": group_name,
+                        "tier1Contacts": len(group_tier1),
+                        "tier2Contacts": len(group_tier2),
                         "tier3Contacts": tier3_count,
-                        "totalContacts": len(tier1_df) + len(tier2_df) + tier3_count
+                        "totalContacts": total_contacts
                     })
 
-                # Add Premier_Contacts.xlsx if Premier extraction was done
+                    # Build breakdown entry
+                    firm_type_breakdown.append({
+                        "firmTypeGroup": group_name,
+                        "displayName": group_name.replace('_', ' / ').replace('FamilyOffice', 'Family Office'),
+                        "tier1Contacts": len(group_tier1),
+                        "tier2Contacts": len(group_tier2),
+                        "tier3Contacts": tier3_count,
+                        "totalContacts": total_contacts
+                    })
+
+                analytics["firm_type_breakdown"] = firm_type_breakdown
+                analytics["is_separated_by_firm_type"] = True
+
+                # Add Premier_Contacts.xlsx to ZIP if Premier extraction was done
                 if has_premier:
                     premier_filename = output_filename.replace('.xlsx', '_Premier_Contacts.xlsx')
                     premier_buffer = create_premier_excel_buffer(premier_df)
@@ -1827,14 +1863,117 @@ class FilterService:
             output_path = str(zip_path)
             output_filename = zip_filename
             report_progress("Output files created", 95)
+
+        elif has_premier:
+            # Not separating by firm type, but has Premier - create two separate files
+            logger.info(f"Job {job_id}: Creating main Excel file and separate Premier file")
+
+            # Create main Excel file with tiers and accounts summary
+            main_output_path = self.filter.output_folder / output_filename
+            with pd.ExcelWriter(main_output_path, engine='xlsxwriter') as writer:
+                standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE', 'AUM_USD_MN']
+
+                # Add First Name and Last Name if they exist
+                if len(tier1_df) > 0 and 'First Name' in tier1_df.columns:
+                    standard_columns.insert(0, 'First Name')
+                if len(tier1_df) > 0 and 'Last Name' in tier1_df.columns:
+                    standard_columns.insert(1 if 'First Name' in standard_columns else 0, 'Last Name')
+
+                # Write Tier 1 sheet
+                if len(tier1_df) > 0:
+                    available_std_cols = [col for col in standard_columns if col in tier1_df.columns]
+                    other_cols = [col for col in tier1_df.columns if col not in available_std_cols]
+                    tier1_reordered = tier1_df[available_std_cols + other_cols]
+                else:
+                    tier1_reordered = tier1_df
+                tier1_reordered.to_excel(writer, sheet_name='Tier1_Key_Contacts', index=False)
+
+                # Write Tier 2 sheet
+                if len(tier2_df) > 0:
+                    available_std_cols = [col for col in standard_columns if col in tier2_df.columns]
+                    other_cols = [col for col in tier2_df.columns if col not in available_std_cols]
+                    tier2_reordered = tier2_df[available_std_cols + other_cols]
+                else:
+                    tier2_reordered = tier2_df
+                tier2_reordered.to_excel(writer, sheet_name='Tier2_Junior_Contacts', index=False)
+
+                # Write Tier 3 sheet (rescued contacts)
+                if rescued_df is not None and len(rescued_df) > 0:
+                    available_std_cols = [col for col in standard_columns if col in rescued_df.columns]
+                    other_cols = [col for col in rescued_df.columns if col not in available_std_cols]
+                    rescued_reordered = rescued_df[available_std_cols + other_cols]
+                    rescued_reordered.to_excel(writer, sheet_name='Tier3_Rescued_Contacts', index=False)
+
+                # Write Accounts Summary sheet
+                all_contacts = pd.concat([tier1_df, tier2_df] + ([rescued_df] if rescued_df is not None and len(rescued_df) > 0 else []), ignore_index=True)
+                accounts_summary = create_accounts_summary(all_contacts)
+                if len(accounts_summary) > 0:
+                    accounts_summary.to_excel(writer, sheet_name='Accounts_Summary', index=False)
+
+            logger.info(f"Job {job_id}: Created main output file: {main_output_path}")
+
+            # Create separate Premier file
+            premier_filename = output_filename.replace('.xlsx', '_Premier_Contacts.xlsx')
+            premier_output_path = self.filter.output_folder / premier_filename
+            premier_buffer = create_premier_excel_buffer(premier_df)
+            with open(premier_output_path, 'wb') as f:
+                f.write(premier_buffer.read())
+            logger.info(f"Job {job_id}: Created Premier file: {premier_output_path} ({len(premier_df)} contacts)")
+
+            # Track both files for analytics
+            tier3_count = len(rescued_df) if rescued_df is not None else 0
+            analytics["premier_file"] = premier_filename
+            analytics["accounts_summary_count"] = len(accounts_summary) if len(accounts_summary) > 0 else 0
+            output_path = str(main_output_path)
+            report_progress("Output files created", 95)
+
         else:
-            # Create single Excel file (original behavior - no separation, no Premier)
+            # Create single Excel file with accounts summary (original behavior - no separation, no Premier)
             logger.info(f"Job {job_id}: Creating output Excel file: {output_filename}")
-            output_path = self.filter.create_output_file(
-                tier1_df, tier2_df, file_info, dedup_count, output_filename,
-                deduplicated_df, delta_df, excluded_firms_analysis,
-                rescued_df, rescue_stats, contact_lists_only=True
-            )
+
+            main_output_path = self.filter.output_folder / output_filename
+            with pd.ExcelWriter(main_output_path, engine='xlsxwriter') as writer:
+                standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE', 'AUM_USD_MN']
+
+                # Add First Name and Last Name if they exist
+                if len(tier1_df) > 0 and 'First Name' in tier1_df.columns:
+                    standard_columns.insert(0, 'First Name')
+                if len(tier1_df) > 0 and 'Last Name' in tier1_df.columns:
+                    standard_columns.insert(1 if 'First Name' in standard_columns else 0, 'Last Name')
+
+                # Write Tier 1 sheet
+                if len(tier1_df) > 0:
+                    available_std_cols = [col for col in standard_columns if col in tier1_df.columns]
+                    other_cols = [col for col in tier1_df.columns if col not in available_std_cols]
+                    tier1_reordered = tier1_df[available_std_cols + other_cols]
+                else:
+                    tier1_reordered = tier1_df
+                tier1_reordered.to_excel(writer, sheet_name='Tier1_Key_Contacts', index=False)
+
+                # Write Tier 2 sheet
+                if len(tier2_df) > 0:
+                    available_std_cols = [col for col in standard_columns if col in tier2_df.columns]
+                    other_cols = [col for col in tier2_df.columns if col not in available_std_cols]
+                    tier2_reordered = tier2_df[available_std_cols + other_cols]
+                else:
+                    tier2_reordered = tier2_df
+                tier2_reordered.to_excel(writer, sheet_name='Tier2_Junior_Contacts', index=False)
+
+                # Write Tier 3 sheet (rescued contacts)
+                if rescued_df is not None and len(rescued_df) > 0:
+                    available_std_cols = [col for col in standard_columns if col in rescued_df.columns]
+                    other_cols = [col for col in rescued_df.columns if col not in available_std_cols]
+                    rescued_reordered = rescued_df[available_std_cols + other_cols]
+                    rescued_reordered.to_excel(writer, sheet_name='Tier3_Rescued_Contacts', index=False)
+
+                # Write Accounts Summary sheet
+                all_contacts = pd.concat([tier1_df, tier2_df] + ([rescued_df] if rescued_df is not None and len(rescued_df) > 0 else []), ignore_index=True)
+                accounts_summary = create_accounts_summary(all_contacts)
+                if len(accounts_summary) > 0:
+                    accounts_summary.to_excel(writer, sheet_name='Accounts_Summary', index=False)
+                    analytics["accounts_summary_count"] = len(accounts_summary)
+
+            output_path = str(main_output_path)
             logger.info(f"Job {job_id}: Output file created at {output_path}")
             report_progress("Output file created", 95)
 
