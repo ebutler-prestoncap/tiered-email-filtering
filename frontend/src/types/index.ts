@@ -157,6 +157,25 @@ export interface Analytics {
     by_firm_type?: boolean;
     breakdown_by_type?: Record<string, { firms: number; contacts: number }>;
   };
+  // Removal list statistics
+  removal_list_stats?: {
+    account_removal: {
+      applied: boolean;
+      list_name?: string;
+      list_size?: number;
+      contacts_removed: number;
+      accounts_matched: number;
+    };
+    contact_removal: {
+      applied: boolean;
+      list_name?: string;
+      list_size?: number;
+      contacts_removed: number;
+      email_matches: number;
+      name_account_matches: number;
+    };
+    total_removed: number;
+  };
 }
 
 export interface ApiResponse<T> {

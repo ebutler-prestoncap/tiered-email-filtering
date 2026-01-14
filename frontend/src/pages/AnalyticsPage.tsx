@@ -476,6 +476,80 @@ export default function AnalyticsPage() {
             </div>
           </section>
 
+          {/* Removal List Stats Section */}
+          {analytics?.removal_list_stats && analytics.removal_list_stats.total_removed > 0 && (
+            <section className="details-section">
+              <h2>Removal List Summary</h2>
+              <p className="section-description">
+                Contacts removed by uploaded removal lists.
+              </p>
+              <div className="summary-grid">
+                {analytics.removal_list_stats.account_removal.applied && (
+                  <>
+                    <div className="summary-card">
+                      <div className="summary-label">Account Removal List</div>
+                      <div className="summary-value" style={{ fontSize: '0.9rem' }}>
+                        {analytics.removal_list_stats.account_removal.list_name || 'Uploaded list'}
+                      </div>
+                    </div>
+                    <div className="summary-card">
+                      <div className="summary-label">Accounts in List</div>
+                      <div className="summary-value">
+                        {analytics.removal_list_stats.account_removal.list_size?.toLocaleString() || 0}
+                      </div>
+                    </div>
+                    <div className="summary-card">
+                      <div className="summary-label">Accounts Matched</div>
+                      <div className="summary-value">
+                        {analytics.removal_list_stats.account_removal.accounts_matched?.toLocaleString() || 0}
+                      </div>
+                    </div>
+                    <div className="summary-card">
+                      <div className="summary-label">Contacts Removed (Accounts)</div>
+                      <div className="summary-value">
+                        {analytics.removal_list_stats.account_removal.contacts_removed?.toLocaleString() || 0}
+                      </div>
+                    </div>
+                  </>
+                )}
+                {analytics.removal_list_stats.contact_removal.applied && (
+                  <>
+                    <div className="summary-card">
+                      <div className="summary-label">Contact Removal List</div>
+                      <div className="summary-value" style={{ fontSize: '0.9rem' }}>
+                        {analytics.removal_list_stats.contact_removal.list_name || 'Uploaded list'}
+                      </div>
+                    </div>
+                    <div className="summary-card">
+                      <div className="summary-label">Contacts in List</div>
+                      <div className="summary-value">
+                        {analytics.removal_list_stats.contact_removal.list_size?.toLocaleString() || 0}
+                      </div>
+                    </div>
+                    <div className="summary-card">
+                      <div className="summary-label">Email Matches</div>
+                      <div className="summary-value">
+                        {analytics.removal_list_stats.contact_removal.email_matches?.toLocaleString() || 0}
+                      </div>
+                    </div>
+                    <div className="summary-card">
+                      <div className="summary-label">Name+Account Matches</div>
+                      <div className="summary-value">
+                        {analytics.removal_list_stats.contact_removal.name_account_matches?.toLocaleString() || 0}
+                      </div>
+                    </div>
+                  </>
+                )}
+                <div className="summary-card" style={{ backgroundColor: 'var(--color-surface)' }}>
+                  <div className="summary-label">Total Removed by Lists</div>
+                  <div className="summary-value" style={{ color: 'var(--color-error)' }}>
+                    {analytics.removal_list_stats.total_removed?.toLocaleString() || 0}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* Firm Type Breakdown Section - for separated firm type jobs */}
           {(analytics?.is_separated_by_firm_type || job.settings?.separateByFirmType) && (
             <section className="details-section firm-type-section">

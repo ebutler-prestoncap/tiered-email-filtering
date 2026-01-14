@@ -189,12 +189,18 @@ class FilterService:
         self.contact_removal_normalized: Set[Tuple[str, str]] = set()  # Pre-normalized (name, account) tuples
         # Track removed contacts for analytics
         self.removal_list_removed: List[Dict] = []  # Track contacts removed by removal lists
+        # Track removal list metadata for summary
+        self.account_removal_list_name: Optional[str] = None
+        self.account_removal_list_size: int = 0
+        self.contact_removal_list_name: Optional[str] = None
+        self.contact_removal_list_size: int = 0
 
-    def load_account_removal_list(self, csv_path: str) -> int:
+    def load_account_removal_list(self, csv_path: str, list_name: Optional[str] = None) -> int:
         """Load account removal list from CSV file.
         Returns the number of accounts loaded."""
         self.account_removal_set = set()
         self.account_removal_normalized = set()
+        self.account_removal_list_name = list_name or Path(csv_path).name
         try:
             with open(csv_path, 'r', encoding='utf-8-sig') as csvfile:
                 reader = csv.DictReader(csvfile)
@@ -212,18 +218,20 @@ class FilterService:
                         normalized = normalize_name(lower_name)
                         if normalized:
                             self.account_removal_normalized.add(normalized)
-            logger.info(f"Loaded {len(self.account_removal_set)} accounts from removal list")
-            return len(self.account_removal_set)
+            self.account_removal_list_size = len(self.account_removal_set)
+            logger.info(f"Loaded {self.account_removal_list_size} accounts from removal list '{self.account_removal_list_name}'")
+            return self.account_removal_list_size
         except Exception as e:
             logger.error(f"Failed to load account removal list: {e}")
             return 0
 
-    def load_contact_removal_list(self, csv_path: str) -> int:
+    def load_contact_removal_list(self, csv_path: str, list_name: Optional[str] = None) -> int:
         """Load contact removal list from CSV file.
         Returns the number of contacts loaded."""
         self.contact_removal_set = set()
         self.contact_removal_emails = set()
         self.contact_removal_normalized = set()
+        self.contact_removal_list_name = list_name or Path(csv_path).name
         try:
             with open(csv_path, 'r', encoding='utf-8-sig') as csvfile:
                 reader = csv.DictReader(csvfile)
@@ -255,18 +263,25 @@ class FilterService:
                         account_normalized = normalize_name(account_lower)
                         if name_normalized and account_normalized:
                             self.contact_removal_normalized.add((name_normalized, account_normalized))
-            logger.info(f"Loaded {len(self.contact_removal_set)} contacts from removal list ({len(self.contact_removal_emails)} emails, {len(self.contact_removal_normalized)} name+account)")
-            return len(self.contact_removal_set)
+            self.contact_removal_list_size = len(self.contact_removal_set)
+            logger.info(f"Loaded {self.contact_removal_list_size} contacts from removal list '{self.contact_removal_list_name}' ({len(self.contact_removal_emails)} emails, {len(self.contact_removal_normalized)} name+account)")
+            return self.contact_removal_list_size
         except Exception as e:
             logger.error(f"Failed to load contact removal list: {e}")
             return 0
 
-    def apply_account_removal(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
+    def apply_account_removal(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict], Dict[str, Any]]:
         """Remove rows where the INVESTOR/account column matches the removal list.
         Uses fast exact matching first, with fuzzy fallback only for non-matches.
-        Returns (filtered_df, list of removed contact records)."""
+        Returns (filtered_df, list of removed contact records, stats dict)."""
+        stats = {
+            'contacts_removed': 0,
+            'accounts_matched': 0,
+            'exact_matches': 0,
+            'substring_matches': 0,
+        }
         if not self.account_removal_set:
-            return df, []
+            return df, [], stats
 
         initial_count = len(df)
         removed_records = []
@@ -339,16 +354,33 @@ class FilterService:
 
         filtered_df = df[~all_removed_mask].copy()
         removed_count = initial_count - len(filtered_df)
-        logger.info(f"Account removal: removed {removed_count} contacts from {len(self.account_removal_set)} excluded accounts (exact: {exact_match_mask.sum()}, substring: {len(fuzzy_removed_indices)})")
 
-        return filtered_df, removed_records
+        # Calculate unique accounts matched
+        matched_accounts = set()
+        for record in removed_records:
+            if record.get('investor'):
+                matched_accounts.add(record['investor'].lower().strip())
 
-    def apply_contact_removal(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
+        stats['contacts_removed'] = removed_count
+        stats['accounts_matched'] = len(matched_accounts)
+        stats['exact_matches'] = int(exact_match_mask.sum())
+        stats['substring_matches'] = len(fuzzy_removed_indices)
+
+        logger.info(f"Account removal: removed {removed_count} contacts from {len(matched_accounts)} matched accounts (exact: {stats['exact_matches']}, substring: {stats['substring_matches']})")
+
+        return filtered_df, removed_records, stats
+
+    def apply_contact_removal(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict], Dict[str, Any]]:
         """Remove rows where the contact matches the removal list (by email or name+account).
         Uses fast exact matching first, with substring fallback only for non-matches.
-        Returns (filtered_df, list of removed contact records)."""
+        Returns (filtered_df, list of removed contact records, stats dict)."""
+        stats = {
+            'contacts_removed': 0,
+            'email_matches': 0,
+            'name_account_matches': 0,
+        }
         if not self.contact_removal_set:
-            return df, []
+            return df, [], stats
 
         initial_count = len(df)
         removed_records = []
@@ -369,7 +401,7 @@ class FilterService:
 
         if email_col is None and (name_col is None or investor_col is None):
             logger.warning("Missing required columns for contact removal, skipping")
-            return df, []
+            return df, [], stats
 
         # Vectorized: pre-compute normalized values
         if email_col:
@@ -430,9 +462,14 @@ class FilterService:
 
         filtered_df = df[~all_removed_mask].copy()
         removed_count = initial_count - len(filtered_df)
-        logger.info(f"Contact removal: removed {removed_count} contacts (email: {email_match_mask.sum()}, name+account: {len(name_account_match_indices)})")
 
-        return filtered_df, removed_records
+        stats['contacts_removed'] = removed_count
+        stats['email_matches'] = int(email_match_mask.sum())
+        stats['name_account_matches'] = len(name_account_match_indices)
+
+        logger.info(f"Contact removal: removed {removed_count} contacts (email: {stats['email_matches']}, name+account: {stats['name_account_matches']})")
+
+        return filtered_df, removed_records, stats
 
     def _classify_firm_type(self, firm_type_value: str) -> str:
         """Classify a firm type value into one of the 6 groups"""
@@ -775,18 +812,20 @@ class FilterService:
                 if account_removal_list and account_removal_list.get('stored_path'):
                     stored_path = Path(account_removal_list['stored_path'])
                     if stored_path.exists():
-                        self.load_account_removal_list(str(stored_path))
+                        list_name = account_removal_list.get('original_name', stored_path.name)
+                        self.load_account_removal_list(str(stored_path), list_name=list_name)
                         db.update_removal_list_last_used(account_removal_list['id'])
-                        logger.info(f"Job {job_id}: Loaded account removal list: {account_removal_list['original_name']}")
+                        logger.info(f"Job {job_id}: Loaded account removal list: {list_name}")
 
             if apply_contact_removal:
                 contact_removal_list = db.get_active_removal_list('contact')
                 if contact_removal_list and contact_removal_list.get('stored_path'):
                     stored_path = Path(contact_removal_list['stored_path'])
                     if stored_path.exists():
-                        self.load_contact_removal_list(str(stored_path))
+                        list_name = contact_removal_list.get('original_name', stored_path.name)
+                        self.load_contact_removal_list(str(stored_path), list_name=list_name)
                         db.update_removal_list_last_used(contact_removal_list['id'])
-                        logger.info(f"Job {job_id}: Loaded contact removal list: {contact_removal_list['original_name']}")
+                        logger.info(f"Job {job_id}: Loaded contact removal list: {list_name}")
 
             # Check for cancellation after loading lists
             if cancel_event and cancel_event.is_set():
@@ -1249,9 +1288,10 @@ class FilterService:
 
         # Apply account removal list (from uploaded CSV)
         account_removed_records = []
+        account_removal_stats = {'contacts_removed': 0, 'accounts_matched': 0, 'exact_matches': 0, 'substring_matches': 0}
         if self.account_removal_set:
             logger.info(f"Job {job_id}: Applying account removal list to {len(deduplicated_df)} contacts")
-            deduplicated_df, account_removed_records = self.apply_account_removal(deduplicated_df)
+            deduplicated_df, account_removed_records, account_removal_stats = self.apply_account_removal(deduplicated_df)
             logger.info(f"Job {job_id}: After account removal: {len(deduplicated_df)} contacts remain ({len(account_removed_records)} removed)")
 
         # Check for cancellation
@@ -1262,9 +1302,10 @@ class FilterService:
 
         # Apply contact removal list (from uploaded CSV)
         contact_removed_records = []
+        contact_removal_stats = {'contacts_removed': 0, 'email_matches': 0, 'name_account_matches': 0}
         if self.contact_removal_set:
             logger.info(f"Job {job_id}: Applying contact removal list to {len(deduplicated_df)} contacts")
-            deduplicated_df, contact_removed_records = self.apply_contact_removal(deduplicated_df)
+            deduplicated_df, contact_removed_records, contact_removal_stats = self.apply_contact_removal(deduplicated_df)
             logger.info(f"Job {job_id}: After contact removal: {len(deduplicated_df)} contacts remain ({len(contact_removed_records)} removed)")
 
         # Store removal list records for delta analysis
@@ -1540,6 +1581,26 @@ class FilterService:
             }
         else:
             analytics["premier_extraction"] = {"enabled": False}
+
+        # Add removal list stats to analytics
+        analytics["removal_list_stats"] = {
+            "account_removal": {
+                "applied": bool(self.account_removal_set),
+                "list_name": self.account_removal_list_name,
+                "list_size": self.account_removal_list_size,
+                "contacts_removed": account_removal_stats.get('contacts_removed', 0),
+                "accounts_matched": account_removal_stats.get('accounts_matched', 0),
+            },
+            "contact_removal": {
+                "applied": bool(self.contact_removal_set),
+                "list_name": self.contact_removal_list_name,
+                "list_size": self.contact_removal_list_size,
+                "contacts_removed": contact_removal_stats.get('contacts_removed', 0),
+                "email_matches": contact_removal_stats.get('email_matches', 0),
+                "name_account_matches": contact_removal_stats.get('name_account_matches', 0),
+            },
+            "total_removed": account_removal_stats.get('contacts_removed', 0) + contact_removal_stats.get('contacts_removed', 0),
+        }
 
         # Check for cancellation before creating output file
         if cancel_event and cancel_event.is_set():
