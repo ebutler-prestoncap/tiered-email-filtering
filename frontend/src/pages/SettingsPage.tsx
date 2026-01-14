@@ -1,10 +1,29 @@
 import { useEffect, useState } from 'react';
 import { getPresets, createPreset, updatePreset, deletePreset, setDefaultPreset } from '../services/api';
-import type { SettingsPreset, ProcessingSettings } from '../types';
+import type { SettingsPreset, ProcessingSettings, TierFilterConfig } from '../types';
 import FieldFilters from '../components/FieldFilters';
 import ListInput from '../components/ListInput';
+import TierFilterConfigComponent from '../components/TierFilterConfig';
 import RemovalListManager from '../components/RemovalListManager';
 import './SettingsPage.css';
+
+const DEFAULT_TIER1_FILTERS: TierFilterConfig = {
+  includeKeywords: ['cio', 'chief investment officer', 'portfolio manager', 'director'],
+  excludeKeywords: ['operations', 'hr', 'marketing'],
+  requireInvestmentTeam: false,
+};
+
+const DEFAULT_TIER2_FILTERS: TierFilterConfig = {
+  includeKeywords: ['analyst', 'associate', 'director'],
+  excludeKeywords: ['operations', 'hr', 'marketing'],
+  requireInvestmentTeam: true,
+};
+
+const DEFAULT_TIER3_FILTERS: TierFilterConfig = {
+  includeKeywords: ['ceo', 'cfo', 'director'],
+  excludeKeywords: [],
+  requireInvestmentTeam: false,
+};
 
 export default function SettingsPage() {
   const [presets, setPresets] = useState<SettingsPreset[]>([]);
@@ -287,6 +306,24 @@ export default function SettingsPage() {
                     hint="Format: Name|Firm per line. These contacts will bypass filters."
                   />
                 </div>
+                <div className="edit-tier-filters-section">
+                  <h5>Tier Filter Configurations</h5>
+                  <TierFilterConfigComponent
+                    tierNumber={1}
+                    config={editSettings?.tier1Filters || DEFAULT_TIER1_FILTERS}
+                    onChange={(config) => setEditSettings(prev => prev ? { ...prev, tier1Filters: config } : null)}
+                  />
+                  <TierFilterConfigComponent
+                    tierNumber={2}
+                    config={editSettings?.tier2Filters || DEFAULT_TIER2_FILTERS}
+                    onChange={(config) => setEditSettings(prev => prev ? { ...prev, tier2Filters: config } : null)}
+                  />
+                  <TierFilterConfigComponent
+                    tierNumber={3}
+                    config={editSettings?.tier3Filters || DEFAULT_TIER3_FILTERS}
+                    onChange={(config) => setEditSettings(prev => prev ? { ...prev, tier3Filters: config } : null)}
+                  />
+                </div>
                 <div className="edit-field-filters">
                   <FieldFilters
                     filters={editSettings?.fieldFilters || []}
@@ -520,6 +557,24 @@ export default function SettingsPage() {
                         onChange={(value) => setEditSettings(prev => prev ? { ...prev, contactInclusionList: value } : null)}
                         placeholder="Enter contacts to include (Name|Firm), one per line"
                         hint="Format: Name|Firm per line. These contacts will bypass filters."
+                      />
+                    </div>
+                    <div className="edit-tier-filters-section">
+                      <h5>Tier Filter Configurations</h5>
+                      <TierFilterConfigComponent
+                        tierNumber={1}
+                        config={editSettings?.tier1Filters || DEFAULT_TIER1_FILTERS}
+                        onChange={(config) => setEditSettings(prev => prev ? { ...prev, tier1Filters: config } : null)}
+                      />
+                      <TierFilterConfigComponent
+                        tierNumber={2}
+                        config={editSettings?.tier2Filters || DEFAULT_TIER2_FILTERS}
+                        onChange={(config) => setEditSettings(prev => prev ? { ...prev, tier2Filters: config } : null)}
+                      />
+                      <TierFilterConfigComponent
+                        tierNumber={3}
+                        config={editSettings?.tier3Filters || DEFAULT_TIER3_FILTERS}
+                        onChange={(config) => setEditSettings(prev => prev ? { ...prev, tier3Filters: config } : null)}
                       />
                     </div>
                     <div className="edit-field-filters">
