@@ -44,8 +44,13 @@ flowchart TD
 
     FIELD_FILTER_CHECK{Field Filters<br/>Configured?}
     FIELD_FILTER_CHECK -->|Yes| FIELD_FILTER[Apply Field Filters<br/>52%]
-    FIELD_FILTER --> TIER_CONFIG
-    FIELD_FILTER_CHECK -->|No| TIER_CONFIG
+    FIELD_FILTER --> PREMIER_CHECK
+    FIELD_FILTER_CHECK -->|No| PREMIER_CHECK
+
+    PREMIER_CHECK{Extract Premier<br/>Contacts?}
+    PREMIER_CHECK -->|Yes| PREMIER_EXTRACT[Extract Top N Firms<br/>by AUM<br/>53-54%]
+    PREMIER_EXTRACT --> TIER_CONFIG
+    PREMIER_CHECK -->|No| TIER_CONFIG
 
     TIER_CONFIG[Configure Tier Filters] --> TIER1[Apply Tier 1 Filter<br/>55%]
     TIER1 --> TIER2[Apply Tier 2 Filter<br/>62%]
@@ -87,6 +92,7 @@ flowchart TD
     style TIER1 fill:#FFB6C1
     style TIER2 fill:#FFB6C1
     style RESCUE fill:#ADD8E6
+    style PREMIER_EXTRACT fill:#FFD700
 ```
 
 ## Detailed Stage Descriptions
@@ -176,9 +182,46 @@ Vectorized matching using pandas `.isin()` for performance.
 
 ---
 
+## Premier Contacts Extraction (53-54%) - *Optional*
+
+### 12. Premier Contacts Extraction
+
+**Condition:** `extractPremierContacts` setting is true AND `enableAumMerge` is true
+
+Extracts top N firms by AUM into a separate Premier Contacts list.
+
+**How it works:**
+
+1. Only consider contacts WITH AUM data (contacts without AUM are excluded from Premier)
+2. Group contacts by firm, calculate max AUM per firm
+3. Rank firms by AUM descending
+
+**If "Separate by Firm Type" is enabled:**
+
+- Extract top N firms per firm type bucket (Insurance, Wealth/Family Office, etc.)
+- Maximum of N × 6 firms total (e.g., 25 × 6 = 150 firms)
+
+**If NOT separating by firm type:**
+
+- Extract top N firms overall by AUM
+
+**Premier firms are removed from tier processing:**
+
+- All contacts from Premier firms go into `Premier_Contacts.xlsx`
+- Remaining contacts continue to tier filtering
+- Prevents duplication between Premier and Tier lists
+
+**Output:**
+
+- `{prefix}_Premier_Contacts.xlsx` - Single sheet with all Premier contacts
+- Sorted by AUM (descending), then by firm name
+- Includes all contact fields (NAME, INVESTOR, EMAIL, JOB_TITLE, AUM_USD_MN, etc.)
+
+---
+
 ## Tier Filtering (55-68%)
 
-### 12. Tier 1 Filtering (55%)
+### 13. Tier 1 Filtering (55%)
 **Target:** Senior decision makers and key investment professionals
 
 Default criteria:
@@ -194,7 +237,7 @@ Selection priority:
 4. Sort by priority score
 5. Take top N per firm
 
-### 13. Tier 2 Filtering (62%)
+### 14. Tier 2 Filtering (62%)
 **Target:** Junior investment professionals
 
 Default criteria:
@@ -207,14 +250,14 @@ Default criteria:
 
 ## Post-Tier Processing (68-85%)
 
-### 14. Contact Inclusion (68%) - *Optional*
+### 15. Contact Inclusion (68%) - *Optional*
 **Condition:** `contactInclusion` setting is true
 
 - Force specific contacts into tiers regardless of filters
 - Load from `include_contacts.csv`
 - Contacts added even if they don't match tier criteria
 
-### 15. Email Pattern Discovery (72%) - *Optional*
+### 16. Email Pattern Discovery (72%) - *Optional*
 **Condition:** `findEmails` setting is true (default: true)
 
 - Extract email patterns from known emails by firm
@@ -222,7 +265,7 @@ Default criteria:
 - Fill missing emails using discovered patterns
 - Applies to Tier 1, Tier 2, and Tier 3 (rescued) contacts
 
-### 16. Delta Analysis (80%)
+### 17. Delta Analysis (80%)
 Creates comprehensive tracking of all contacts showing:
 - Processing status (Included, Filtered, Removed)
 - Filter reason (which filter removed the contact)
@@ -239,7 +282,7 @@ Includes contacts removed by:
 
 ## Firm Rescue (Tier 3) - *Optional*
 
-### 17. Rescue Excluded Firms
+### 18. Rescue Excluded Firms
 **Condition:** `includeAllFirms` setting is true
 
 - Find firms with zero contacts in Tier 1 or Tier 2
@@ -255,7 +298,7 @@ Priority scoring factors:
 
 ## Output Generation (85-100%)
 
-### 18. Analytics Extraction (85%)
+### 19. Analytics Extraction (85%)
 Extracts comprehensive analytics:
 - Processing summary (counts, rates)
 - Input file details
@@ -265,7 +308,7 @@ Extracts comprehensive analytics:
 - Firm type breakdown (if separated)
 - AUM merge statistics
 
-### 19. Output File Creation (90-95%)
+### 20. Output File Creation (90-95%)
 
 #### Single File Mode (default)
 Creates Excel with sheets:
@@ -321,6 +364,7 @@ Cancellation raises `RuntimeError("Job cancelled")` which is caught by the job h
 | Account removal | 48% | Applying account removal list |
 | Contact removal | 50% | Applying contact removal list |
 | Field filters | 52% | Applying field-based filters |
+| Premier extraction | 53-54% | Extracting top firms by AUM |
 | Tier 1 | 55% | Applying Tier 1 filter |
 | Tier 2 | 62% | Applying Tier 2 filter |
 | Tier result | 68% | Tier filtering complete |
@@ -362,18 +406,34 @@ Input Files (Excel)
 │ Exclusion Chain │  (Firm/Contact/Field filters)
 └────────┬────────┘
          │
-         ├──────────────────────┬───────────────────┐
-         ▼                      ▼                   ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│    Tier 1       │  │    Tier 2       │  │ Tier 3 (Rescue) │
-│ Key Contacts    │  │ Junior Contacts │  │ Rescued Firms   │
-└────────┬────────┘  └────────┬────────┘  └────────┬────────┘
-         │                    │                    │
-         └────────────────────┴────────────────────┘
-                              │
-                              ▼
-                    ┌─────────────────┐
-                    │  Output Excel   │
-                    │  (or ZIP files) │
-                    └─────────────────┘
+         ▼
+┌─────────────────┐
+│ Premier Check   │  (Extract top N firms by AUM?)
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │         │
+    ▼         ▼
+┌────────┐  ┌─────────────────┐
+│Premier │  │  Remaining      │
+│Contacts│  │  Contacts       │
+└───┬────┘  └────────┬────────┘
+    │                │
+    │    ┌───────────┼───────────────────┐
+    │    │           │                   │
+    │    ▼           ▼                   ▼
+    │  ┌───────────┐ ┌───────────┐ ┌───────────┐
+    │  │  Tier 1   │ │  Tier 2   │ │  Tier 3   │
+    │  │   Key     │ │  Junior   │ │ (Rescue)  │
+    │  └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
+    │        │             │             │
+    │        └─────────────┴─────────────┘
+    │                      │
+    └───────────┬──────────┘
+                │
+                ▼
+      ┌─────────────────┐
+      │   Output ZIP    │
+      │ Premier + Tiers │
+      └─────────────────┘
 ```
