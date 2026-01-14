@@ -529,7 +529,7 @@ def download_results(job_id: str):
 
 @app.route('/api/jobs/<job_id>/download/<filename>', methods=['GET'])
 def download_individual_file(job_id: str, filename: str):
-    """Download individual file from a separated firm type job's zip"""
+    """Download individual file from a separated firm type job's zip or standalone file"""
     import zipfile
 
     try:
@@ -544,15 +544,26 @@ def download_individual_file(job_id: str, filename: str):
         if not output_file.exists():
             return jsonify({"success": False, "error": "File not found"}), 404
 
-        # Must be a zip file for individual downloads
+        # Sanitize filename to prevent path traversal
+        safe_filename = Path(filename).name
+
+        # First check if this is a standalone file (e.g., Premier file)
+        standalone_file = RESULTS_FOLDER / safe_filename
+        if standalone_file.exists() and standalone_file.is_file():
+            return send_file(
+                str(standalone_file),
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=safe_filename
+            )
+
+        # Otherwise check if it's a zip file and extract from it
         if not job["output_filename"].endswith('.zip'):
-            return jsonify({"success": False, "error": "Not a separated firm type job"}), 400
+            return jsonify({"success": False, "error": "File not found"}), 404
 
         # Extract the requested file from the zip
         try:
             with zipfile.ZipFile(str(output_file), 'r') as zipf:
-                # Sanitize filename to prevent path traversal
-                safe_filename = Path(filename).name
                 if safe_filename not in zipf.namelist():
                     return jsonify({"success": False, "error": "File not found in archive"}), 404
 
