@@ -157,6 +157,7 @@ export interface UploadedFile {
   uploadedAt: string;
   lastUsedAt: string | null;
   fileExists?: boolean;
+  validation?: FileValidationResult | null;
 }
 
 export const listUploadedFiles = async (limit: number = 100): Promise<UploadedFile[]> => {
@@ -367,5 +368,32 @@ export const validateUploadedFile = async (fileId: string): Promise<FileValidati
   }
 
   return response.data.validation;
+};
+
+export interface BackfillValidationResult {
+  id: string;
+  originalName: string;
+  status: 'validated' | 'skipped' | 'failed';
+  reason?: string;
+  canProcess?: boolean;
+}
+
+export interface BackfillValidationResponse {
+  success: boolean;
+  totalFiles: number;
+  validatedCount: number;
+  failedCount: number;
+  skippedCount: number;
+  results: BackfillValidationResult[];
+}
+
+export const backfillValidation = async (): Promise<BackfillValidationResponse> => {
+  const response = await api.post<BackfillValidationResponse>('/files/backfill-validation');
+
+  if (!response.data.success) {
+    throw new Error('Failed to backfill validation');
+  }
+
+  return response.data;
 };
 

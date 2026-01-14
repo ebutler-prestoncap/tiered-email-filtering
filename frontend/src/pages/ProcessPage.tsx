@@ -31,6 +31,7 @@ export default function ProcessPage() {
   const [selectedPreviousFileIds, setSelectedPreviousFileIds] = useState<string[]>([]);
   const [previousFileInfo, setPreviousFileInfo] = useState<Map<string, PreviousFileInfo>>(new Map());
   const [showProcessingPanel, setShowProcessingPanel] = useState(false);
+  const [showPreviousFilesModal, setShowPreviousFilesModal] = useState(false);
   // Initialize with default values - ConfigurationPanel will update with preset
   const [settings, setSettings] = useState<ProcessingSettings>({
     includeAllFirms: false,
@@ -324,19 +325,35 @@ export default function ProcessPage() {
           onCancel={handleCancel}
         />
       )}
-      
+
+      <PreviousFilesSelector
+        isOpen={showPreviousFilesModal}
+        onClose={() => setShowPreviousFilesModal(false)}
+        selectedFileIds={selectedPreviousFileIds}
+        onSelectionChange={setSelectedPreviousFileIds}
+        onFileValidated={handlePreviousFileValidated}
+      />
+
       <h1>Process Contacts</h1>
       <p className="page-description">
-        Select previously uploaded input lists and/or upload new Excel files, then configure filtering options to process your contact lists.
+        Upload Excel files or select from previous uploads, then configure filtering options.
       </p>
 
-      <div className="process-layout">
-        <div className="process-left">
-          <PreviousFilesSelector
-            selectedFileIds={selectedPreviousFileIds}
-            onSelectionChange={setSelectedPreviousFileIds}
-            onFileValidated={handlePreviousFileValidated}
-          />
+      <div className="process-layout-vertical">
+        <div className="upload-section">
+          <div className="upload-header">
+            <h2>Input Files</h2>
+            <button
+              className="select-previous-button"
+              onClick={() => setShowPreviousFilesModal(true)}
+            >
+              Select Previous Uploads
+              {selectedPreviousFileIds.length > 0 && (
+                <span className="previous-count">({selectedPreviousFileIds.length})</span>
+              )}
+            </button>
+          </div>
+
           <FileUpload
             onFilesSelected={handleFilesSelected}
             uploadedFiles={uploadedFiles}
@@ -358,17 +375,17 @@ export default function ProcessPage() {
                         <div className="file-validation-badges">
                           {fileInfo.validation.contacts_sheet && (
                             <span className="validation-badge contacts">
-                              ✓ Contacts
+                              Contacts
                             </span>
                           )}
                           {fileInfo.validation.accounts_sheet && (
                             <span className="validation-badge accounts">
-                              ✓ Accounts
+                              Accounts
                             </span>
                           )}
                           {fileInfo.validation.can_merge_aum && (
                             <span className="validation-badge aum">
-                              ✓ AUM
+                              AUM
                             </span>
                           )}
                         </div>
@@ -379,7 +396,7 @@ export default function ProcessPage() {
                       onClick={() => handleRemovePreviousFile(fileInfo.id)}
                       aria-label="Remove file"
                     >
-                      ×
+                      x
                     </button>
                   </div>
                 ))}
@@ -388,14 +405,12 @@ export default function ProcessPage() {
           )}
         </div>
 
-        <div className="process-right">
-          <ConfigurationPanel
-            settings={settings}
-            onSettingsChange={setSettings}
-            onProcess={handleProcess}
-            isProcessing={isProcessing}
-          />
-        </div>
+        <ConfigurationPanel
+          settings={settings}
+          onSettingsChange={setSettings}
+          onProcess={handleProcess}
+          isProcessing={isProcessing}
+        />
       </div>
     </div>
   );

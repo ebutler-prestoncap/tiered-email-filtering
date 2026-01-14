@@ -134,25 +134,39 @@ def process_job_async(job_id: str, uploaded_files: list, original_filenames: lis
 
 @app.route('/api/upload', methods=['POST'])
 def upload_files():
-    """Upload Excel files"""
+    """Upload Excel files and validate them"""
     try:
         saved_paths, original_names = save_uploaded_files(request, UPLOAD_FOLDER)
 
-        # Save file metadata to database
+        # Save file metadata to database with validation
         import uuid
         import os
         file_ids = []
+        validations = []
         for i, (path, original_name) in enumerate(zip(saved_paths, original_names)):
             file_id = str(uuid.uuid4())
             file_size = os.path.getsize(path) if os.path.exists(path) else 0
-            db.save_uploaded_file(file_id, original_name, path, file_size)
+
+            # Validate file and cache result
+            try:
+                validation_result = validate_excel_file(path)
+                validation_result['file_size'] = file_size
+                validation_result['original_name'] = original_name
+                validation_result['file_id'] = file_id
+            except Exception as val_error:
+                logger.warning(f"Could not validate file {original_name}: {val_error}")
+                validation_result = None
+
+            db.save_uploaded_file(file_id, original_name, path, file_size, validation_result)
             file_ids.append(file_id)
+            validations.append(validation_result)
 
         return jsonify({
             "success": True,
             "files": original_names,
             "paths": saved_paths,
-            "fileIds": file_ids
+            "fileIds": file_ids,
+            "validations": validations
         }), 200
     except Exception as e:
         logger.error(f"Upload error: {e}", exc_info=True)
@@ -218,11 +232,27 @@ def validate_file():
 def validate_uploaded_file(file_id: str):
     """
     Validate a previously uploaded file by its ID.
+    Returns cached validation if available, otherwise validates and caches.
     """
     try:
         file_meta = db.get_uploaded_file(file_id)
         if not file_meta:
             return jsonify({"success": False, "error": "File not found"}), 404
+
+        # Check for cached validation first
+        cached_validation = file_meta.get("validation_result")
+        if cached_validation:
+            # Parse if it's a string (shouldn't be, but just in case)
+            import json
+            if isinstance(cached_validation, str):
+                cached_validation = json.loads(cached_validation)
+            # Ensure file_id is set
+            cached_validation['file_id'] = file_id
+            return jsonify({
+                "success": True,
+                "validation": cached_validation,
+                "cached": True
+            }), 200
 
         stored_path = file_meta.get("stored_path")
         if not stored_path or not Path(stored_path).exists():
@@ -234,9 +264,13 @@ def validate_uploaded_file(file_id: str):
         validation_result['file_size'] = file_meta.get('file_size', 0)
         validation_result['file_id'] = file_id
 
+        # Cache the validation result
+        db.update_file_validation(file_id, validation_result)
+
         return jsonify({
             "success": True,
-            "validation": validation_result
+            "validation": validation_result,
+            "cached": False
         }), 200
 
     except Exception as e:
@@ -764,7 +798,7 @@ def set_default_preset(preset_id: str):
 
 @app.route('/api/files', methods=['GET'])
 def list_uploaded_files():
-    """List all previously uploaded files"""
+    """List all previously uploaded files with cached validation"""
     try:
         limit = request.args.get('limit', 100, type=int)
         files = db.list_uploaded_files(limit)
@@ -779,7 +813,8 @@ def list_uploaded_files():
                     "fileSize": f["file_size"],
                     "uploadedAt": f["uploaded_at"],
                     "lastUsedAt": f["last_used_at"],
-                    "fileExists": Path(f["stored_path"]).exists() if f.get("stored_path") else False
+                    "fileExists": Path(f["stored_path"]).exists() if f.get("stored_path") else False,
+                    "validation": f.get("validation_result")
                 }
                 for f in files
             ]
@@ -787,6 +822,65 @@ def list_uploaded_files():
     except Exception as e:
         logger.error(f"List files error: {e}", exc_info=True)
         return jsonify({"success": False, "error": "Failed to list files"}), 500
+
+
+@app.route('/api/files/backfill-validation', methods=['POST'])
+def backfill_file_validation():
+    """Validate all previously uploaded files that don't have cached validation"""
+    try:
+        files = db.get_files_without_validation()
+        validated_count = 0
+        failed_count = 0
+        results = []
+
+        for f in files:
+            file_id = f["id"]
+            stored_path = f.get("stored_path")
+
+            if not stored_path or not Path(stored_path).exists():
+                results.append({
+                    "id": file_id,
+                    "originalName": f.get("original_name", ""),
+                    "status": "skipped",
+                    "reason": "File no longer exists"
+                })
+                continue
+
+            try:
+                validation_result = validate_excel_file(stored_path)
+                validation_result['original_name'] = f.get('original_name', '')
+                validation_result['file_size'] = f.get('file_size', 0)
+                validation_result['file_id'] = file_id
+
+                db.update_file_validation(file_id, validation_result)
+                validated_count += 1
+                results.append({
+                    "id": file_id,
+                    "originalName": f.get("original_name", ""),
+                    "status": "validated",
+                    "canProcess": validation_result.get("can_process", False)
+                })
+            except Exception as val_error:
+                logger.warning(f"Could not validate file {file_id}: {val_error}")
+                failed_count += 1
+                results.append({
+                    "id": file_id,
+                    "originalName": f.get("original_name", ""),
+                    "status": "failed",
+                    "reason": str(val_error)
+                })
+
+        return jsonify({
+            "success": True,
+            "totalFiles": len(files),
+            "validatedCount": validated_count,
+            "failedCount": failed_count,
+            "skippedCount": len(files) - validated_count - failed_count,
+            "results": results
+        }), 200
+    except Exception as e:
+        logger.error(f"Backfill validation error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Failed to backfill validation"}), 500
 
 # Removal list endpoints
 @app.route('/api/removal-lists', methods=['GET'])

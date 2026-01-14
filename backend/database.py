@@ -206,9 +206,16 @@ class Database:
                     stored_path TEXT NOT NULL,
                     file_size INTEGER,
                     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_used_at TIMESTAMP
+                    last_used_at TIMESTAMP,
+                    validation_result TEXT
                 )
             """)
+
+            # Add validation_result column if it doesn't exist (migration for existing DBs)
+            cursor.execute("PRAGMA table_info(uploaded_files)")
+            uploaded_files_columns = {row[1] for row in cursor.fetchall()}
+            if 'validation_result' not in uploaded_files_columns:
+                cursor.execute("ALTER TABLE uploaded_files ADD COLUMN validation_result TEXT")
 
             # Removal lists table - stores account and contact removal lists
             cursor.execute("""
@@ -628,21 +635,44 @@ class Database:
             logger.error(f"Failed to set default preset {preset_id}: {e}")
             raise
 
-    def save_uploaded_file(self, file_id: str, original_name: str, stored_path: str, file_size: int) -> None:
-        """Save uploaded file metadata"""
+    def save_uploaded_file(self, file_id: str, original_name: str, stored_path: str,
+                           file_size: int, validation_result: Optional[Dict] = None) -> None:
+        """Save uploaded file metadata with optional validation result"""
         def _save_file(conn):
             cursor = conn.cursor()
+            validation_json = json.dumps(validation_result) if validation_result else None
             cursor.execute("""
-                INSERT INTO uploaded_files (id, original_name, stored_path, file_size)
-                VALUES (?, ?, ?, ?)
-            """, (file_id, original_name, stored_path, file_size))
-        
+                INSERT INTO uploaded_files (id, original_name, stored_path, file_size, validation_result)
+                VALUES (?, ?, ?, ?, ?)
+            """, (file_id, original_name, stored_path, file_size, validation_json))
+
         try:
             with self.get_connection() as conn:
                 self._execute_with_retry(lambda: _save_file(conn))
             logger.debug(f"Saved uploaded file: {file_id}")
         except Exception as e:
             logger.error(f"Failed to save uploaded file {file_id}: {e}")
+            raise
+
+    def update_file_validation(self, file_id: str, validation_result: Dict) -> bool:
+        """Update validation result for an uploaded file"""
+        def _update_validation(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE uploaded_files
+                SET validation_result = ?
+                WHERE id = ?
+            """, (json.dumps(validation_result), file_id))
+            return cursor.rowcount > 0
+
+        try:
+            with self.get_connection() as conn:
+                updated = self._execute_with_retry(lambda: _update_validation(conn))
+            if updated:
+                logger.debug(f"Updated validation for file: {file_id}")
+            return updated
+        except Exception as e:
+            logger.error(f"Failed to update validation for file {file_id}: {e}")
             raise
     
     def get_uploaded_file(self, file_id: str) -> Optional[Dict]:
@@ -661,30 +691,53 @@ class Database:
             raise
     
     def list_uploaded_files(self, limit: int = 100) -> List[Dict]:
-        """List all uploaded files, most recent first"""
+        """List all uploaded files, most recent first, with cached validation"""
         def _list_files(conn):
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, original_name, stored_path, file_size, uploaded_at, last_used_at
+                SELECT id, original_name, stored_path, file_size, uploaded_at, last_used_at, validation_result
                 FROM uploaded_files
                 ORDER BY uploaded_at DESC
                 LIMIT ?
             """, (limit,))
-            
+
             files = []
             for row in cursor.fetchall():
                 file_dict = dict(row)
-                # Include file even if it's been deleted (for history/reference)
-                # The file may have been processed and cleaned up, but metadata is still useful
+                # Parse validation_result JSON if present
+                if file_dict.get('validation_result'):
+                    try:
+                        file_dict['validation_result'] = json.loads(file_dict['validation_result'])
+                    except (json.JSONDecodeError, TypeError):
+                        file_dict['validation_result'] = None
                 files.append(file_dict)
-            
+
             return files
-        
+
         try:
             with self.get_connection() as conn:
                 return _list_files(conn)
         except Exception as e:
             logger.error(f"Failed to list uploaded files: {e}")
+            raise
+
+    def get_files_without_validation(self) -> List[Dict]:
+        """Get all uploaded files that don't have cached validation"""
+        def _get_files(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, original_name, stored_path, file_size
+                FROM uploaded_files
+                WHERE validation_result IS NULL
+                ORDER BY uploaded_at DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+        try:
+            with self.get_connection() as conn:
+                return _get_files(conn)
+        except Exception as e:
+            logger.error(f"Failed to get files without validation: {e}")
             raise
     
     def update_file_last_used(self, file_id: str) -> None:

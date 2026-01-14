@@ -1,25 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
-import { listUploadedFiles, validateUploadedFile, type FileValidationResult } from '../services/api';
+import { listUploadedFiles, validateUploadedFile, type FileValidationResult, type UploadedFile } from '../services/api';
 import { formatDateTimePacific } from '../utils/dateUtils';
 import './PreviousFilesSelector.css';
 
-interface UploadedFile {
-  id: string;
-  originalName: string;
-  storedPath: string;
-  fileSize: number;
-  uploadedAt: string;
-  lastUsedAt: string | null;
-  fileExists?: boolean;
-}
-
 interface PreviousFilesSelectorProps {
+  isOpen: boolean;
+  onClose: () => void;
   selectedFileIds: string[];
   onSelectionChange: (fileIds: string[]) => void;
   onFileValidated?: (fileId: string, validation: FileValidationResult, fileInfo: UploadedFile) => void;
 }
 
 export default function PreviousFilesSelector({
+  isOpen,
+  onClose,
   selectedFileIds,
   onSelectionChange,
   onFileValidated
@@ -27,7 +21,6 @@ export default function PreviousFilesSelector({
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [fileValidations, setFileValidations] = useState<Map<string, FileValidationResult>>(new Map());
   const [loadingValidations, setLoadingValidations] = useState<Set<string>>(new Set());
-  const [isOpen, setIsOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
   const loadValidationForFile = useCallback(async (fileId: string, fileInfo: UploadedFile) => {
@@ -67,12 +60,36 @@ export default function PreviousFilesSelector({
         const availableFiles = uploadedFiles.filter(file => file.fileExists !== false);
         setFiles(availableFiles);
 
-        // Start loading validations for all files
+        // Use cached validation or load validation for files without it
+        const newValidations = new Map<string, FileValidationResult>();
+        const filesToValidate: UploadedFile[] = [];
+
         availableFiles.forEach(file => {
-          // Don't reload if already loading or loaded
-          if (!loadingValidations.has(file.id) && !fileValidations.has(file.id)) {
-            loadValidationForFile(file.id, file);
+          if (file.validation) {
+            // Use cached validation
+            newValidations.set(file.id, file.validation);
+            // Notify parent of validation result
+            if (onFileValidated) {
+              onFileValidated(file.id, file.validation, file);
+            }
+          } else if (!loadingValidations.has(file.id) && !fileValidations.has(file.id)) {
+            // Queue for validation
+            filesToValidate.push(file);
           }
+        });
+
+        // Update state with cached validations
+        if (newValidations.size > 0) {
+          setFileValidations(prev => {
+            const merged = new Map(prev);
+            newValidations.forEach((val, key) => merged.set(key, val));
+            return merged;
+          });
+        }
+
+        // Load validation for files without cached validation
+        filesToValidate.forEach(file => {
+          loadValidationForFile(file.id, file);
         });
       } catch (error) {
         // Error logged to console for debugging in development
@@ -120,48 +137,41 @@ export default function PreviousFilesSelector({
       <div className="file-validation-badges">
         {validation.contacts_sheet && (
           <span className="validation-badge contacts">
-            ✓ Contacts ({validation.sheets.find(s => s.name === validation.contacts_sheet)?.row_count?.toLocaleString() || '?'})
+            Contacts ({validation.sheets.find(s => s.name === validation.contacts_sheet)?.row_count?.toLocaleString() || '?'})
           </span>
         )}
         {validation.accounts_sheet && (
           <span className="validation-badge accounts">
-            ✓ Accounts ({validation.sheets.find(s => s.name === validation.accounts_sheet)?.row_count?.toLocaleString() || '?'})
+            Accounts ({validation.sheets.find(s => s.name === validation.accounts_sheet)?.row_count?.toLocaleString() || '?'})
           </span>
         )}
         {validation.can_merge_aum && (
           <span className="validation-badge aum">
-            ✓ AUM
+            AUM
           </span>
         )}
         {!validation.can_process && (
           <span className="validation-badge error">
-            ✗ Invalid
+            Invalid
           </span>
         )}
       </div>
     );
   };
 
+  if (!isOpen) return null;
 
   return (
-    <div className="previous-files-selector">
-      <button
-        className="selector-toggle"
-        onClick={() => setIsOpen(!isOpen)}
-        aria-expanded={isOpen}
-      >
-        <span className="selector-icon">📂</span>
-        <span className="selector-label">
-          Previously Uploaded Input Lists
-          {selectedFileIds.length > 0 && (
-            <span className="selected-count"> ({selectedFileIds.length} selected)</span>
-          )}
-        </span>
-        <span className={`selector-arrow ${isOpen ? 'open' : ''}`}>▼</span>
-      </button>
+    <div className="previous-files-modal-overlay" onClick={onClose}>
+      <div className="previous-files-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Select Previous Uploads</h2>
+          <button className="modal-close" onClick={onClose} aria-label="Close">
+            x
+          </button>
+        </div>
 
-      {isOpen && (
-        <div className="selector-dropdown">
+        <div className="modal-content">
           {isLoading ? (
             <div className="selector-loading">Loading files...</div>
           ) : files.length === 0 ? (
@@ -178,7 +188,7 @@ export default function PreviousFilesSelector({
                 return (
                   <label
                     key={file.id}
-                    className={`selector-item ${isInvalid ? 'file-invalid' : ''}`}
+                    className={`selector-item ${isInvalid ? 'file-invalid' : ''} ${selectedFileIds.includes(file.id) ? 'selected' : ''}`}
                     htmlFor={`file-checkbox-${file.id}`}
                   >
                     <input
@@ -196,14 +206,8 @@ export default function PreviousFilesSelector({
                       {renderValidationBadges(file.id)}
                       <div className="selector-item-meta">
                         <span>{formatFileSize(file.fileSize)}</span>
-                        <span className="selector-item-separator">•</span>
+                        <span className="selector-item-separator">-</span>
                         <span>{formatDateTimePacific(file.uploadedAt)}</span>
-                        {file.lastUsedAt && (
-                          <>
-                            <span className="selector-item-separator">•</span>
-                            <span>Last used: {formatDateTimePacific(file.lastUsedAt)}</span>
-                          </>
-                        )}
                       </div>
                     </div>
                   </label>
@@ -212,7 +216,16 @@ export default function PreviousFilesSelector({
             </div>
           )}
         </div>
-      )}
+
+        <div className="modal-footer">
+          <span className="selected-count">
+            {selectedFileIds.length} file{selectedFileIds.length !== 1 ? 's' : ''} selected
+          </span>
+          <button className="modal-done-button" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
