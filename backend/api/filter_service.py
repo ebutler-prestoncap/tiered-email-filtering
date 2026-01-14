@@ -1628,36 +1628,7 @@ class FilterService:
         # Check if we need to separate by firm type
         separate_by_firm_type = settings.get("separateByFirmType", False)
 
-        # Helper function to create Premier Excel file in memory
-        def create_premier_excel_buffer(premier_contacts_df: pd.DataFrame) -> io.BytesIO:
-            """Create an Excel file with Premier contacts in memory"""
-            excel_buffer = io.BytesIO()
-            standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE', 'AUM_USD_MN']
-
-            # Add First Name and Last Name if they exist
-            if len(premier_contacts_df) > 0 and 'First Name' in premier_contacts_df.columns:
-                standard_columns.insert(0, 'First Name')
-            if len(premier_contacts_df) > 0 and 'Last Name' in premier_contacts_df.columns:
-                standard_columns.insert(1 if 'First Name' in standard_columns else 0, 'Last Name')
-
-            with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                if len(premier_contacts_df) > 0:
-                    # Sort by AUM descending, then by firm name
-                    sorted_df = premier_contacts_df.sort_values(
-                        by=['AUM_USD_MN', 'INVESTOR'] if 'INVESTOR' in premier_contacts_df.columns else ['AUM_USD_MN'],
-                        ascending=[False, True] if 'INVESTOR' in premier_contacts_df.columns else [False]
-                    )
-                    available_std_cols = [col for col in standard_columns if col in sorted_df.columns]
-                    other_cols = [col for col in sorted_df.columns if col not in available_std_cols]
-                    reordered_df = sorted_df[available_std_cols + other_cols]
-                else:
-                    reordered_df = premier_contacts_df
-                reordered_df.to_excel(writer, sheet_name='Premier_Contacts', index=False)
-
-            excel_buffer.seek(0)
-            return excel_buffer
-
-        # Helper function to create accounts summary sheet
+        # Helper function to create accounts summary sheet (defined first as it's used by other helpers)
         def create_accounts_summary(all_contacts_df: pd.DataFrame) -> pd.DataFrame:
             """Create a deduplicated accounts sheet with primary contact per firm"""
             if len(all_contacts_df) == 0:
@@ -1726,6 +1697,38 @@ class FilterService:
                 accounts_df = accounts_df.sort_values('FIRM')
 
             return accounts_df
+
+        # Helper function to create Premier Excel buffer with optional accounts summary
+        def create_premier_excel_buffer(premier_contacts_df: pd.DataFrame, include_accounts_summary: bool = True) -> io.BytesIO:
+            """Create an Excel file with Premier contacts and optional accounts summary in memory"""
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE', 'AUM_USD_MN']
+
+                # Add First Name and Last Name if they exist
+                if 'First Name' in premier_contacts_df.columns:
+                    standard_columns.insert(0, 'First Name')
+                if 'Last Name' in premier_contacts_df.columns:
+                    standard_columns.insert(1 if 'First Name' in standard_columns else 0, 'Last Name')
+
+                # Reorder columns for Premier contacts
+                if len(premier_contacts_df) > 0:
+                    available_std_cols = [col for col in standard_columns if col in premier_contacts_df.columns]
+                    other_cols = [col for col in premier_contacts_df.columns if col not in available_std_cols]
+                    premier_reordered = premier_contacts_df[available_std_cols + other_cols]
+                else:
+                    premier_reordered = premier_contacts_df
+
+                premier_reordered.to_excel(writer, sheet_name='Premier_Contacts', index=False)
+
+                # Add accounts summary sheet for Premier contacts
+                if include_accounts_summary and len(premier_contacts_df) > 0:
+                    premier_accounts_df = create_accounts_summary(premier_contacts_df)
+                    if len(premier_accounts_df) > 0:
+                        premier_accounts_df.to_excel(writer, sheet_name='Premier_Accounts', index=False)
+
+            excel_buffer.seek(0)
+            return excel_buffer
 
         # Determine if we need to create a ZIP (only when separating by firm type)
         has_premier = premier_df is not None and len(premier_df) > 0
