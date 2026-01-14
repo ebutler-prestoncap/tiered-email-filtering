@@ -88,7 +88,19 @@ function findCommonWords(filenames: string[]): string[] {
 }
 
 /**
+ * Extract the first few words from a filename
+ * @param filename - The cleaned filename
+ * @param maxWords - Maximum number of words to extract (default: 2)
+ * @returns First few words joined with hyphens
+ */
+function extractRootWords(filename: string, maxWords: number = 2): string {
+  const words = filename.split(/[-_\s]+/).filter(w => w.length > 0);
+  return words.slice(0, maxWords).join('-');
+}
+
+/**
  * Generate a smart prefix from one or more filenames
+ * Uses only the first few words (root) of the filename(s)
  * @param filenames - Array of filenames (File objects or strings)
  * @returns Generated prefix string
  */
@@ -112,23 +124,24 @@ export function generatePrefixFromFilenames(filenames: (File | string)[]): strin
     return 'Combined-Contacts';
   }
   
-  // Single file: use cleaned name
+  // Single file: extract first 1-2 words
   if (validNames.length === 1) {
-    return validNames[0];
+    const rootWords = extractRootWords(validNames[0], 2);
+    return rootWords || 'Combined-Contacts';
   }
   
-  // Multiple files: find common words
+  // Multiple files: find common words, then take first few
   const commonWords = findCommonWords(validNames);
   
   if (commonWords.length > 0) {
-    // Use common words joined with hyphens
-    return commonWords.join('-');
+    // Use first 2 common words joined with hyphens
+    return commonWords.slice(0, 2).join('-');
   }
   
-  // No common words: use "Combined" + first meaningful word from first file
+  // No common words: use first word from first file
   const firstWords = validNames[0].split(/[-_\s]+/).filter(w => w.length > 0);
   if (firstWords.length > 0) {
-    return `Combined-${firstWords[0]}`;
+    return firstWords[0];
   }
   
   // Fallback

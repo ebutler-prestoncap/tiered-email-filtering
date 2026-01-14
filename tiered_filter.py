@@ -436,7 +436,7 @@ class TieredFilter:
             
             if key not in dedup_lookup:
                 delta_df.at[idx, 'PROCESSING_STATUS'] = 'Removed'
-                delta_df.at[idx, 'FILTER_REASON'] = 'Duplicate (name + firm)'
+                delta_df.at[idx, 'FILTER_REASON'] = 'Duplicate in input data (same name + firm)'
         
         # Track tier filtering
         # Create lookups for tier contacts
@@ -955,6 +955,8 @@ class TieredFilter:
     def apply_tier_filter(self, df: pd.DataFrame, tier_config: Dict[str, Any], max_contacts: int) -> pd.DataFrame:
         """Apply tier-specific filtering with firm-based limits"""
         logger.info(f"Applying {tier_config['name']} filtering to {len(df)} contacts")
+        logger.info(f"  Max contacts per firm: {max_contacts}")
+        logger.info(f"  Require investment team: {tier_config.get('require_investment_team', False)}")
         
         if len(df) == 0:
             return df
@@ -966,6 +968,12 @@ class TieredFilter:
         # Filter contacts based on criteria
         filtered_contacts = []
         debug_count = 0
+        stats = {
+            'title_match': 0,
+            'excluded': 0,
+            'role_filtered': 0,
+            'passed': 0
+        }
         
         for idx, row in df.iterrows():
             # Handle potential Series values properly
@@ -991,17 +999,21 @@ class TieredFilter:
             # Check job title matches
             if not job_title_regex.search(job_title):
                 continue
+            stats['title_match'] += 1
             
             # Check exclusions
             if exclusion_regex.search(job_title):
+                stats['excluded'] += 1
                 continue
             
-            # Check investment team and portfolio management requirement
+            # Check investment team requirement
             if tier_config['require_investment_team']:
                 has_investment = 'investment team' in role or 'investment' in role
-                has_portfolio = 'portfolio management' in role or 'portfolio' in role
-                if not (has_investment and has_portfolio):
+                if not has_investment:
+                    stats['role_filtered'] += 1
                     continue
+            
+            stats['passed'] += 1
             
             # Calculate priority score
             priority = self.calculate_priority(row, tier_config)
@@ -1017,12 +1029,16 @@ class TieredFilter:
             row_dict['priority_score'] = priority
             filtered_contacts.append(row_dict)
         
+        logger.info(f"  Filtering stats: {stats['title_match']} title matches, {stats['excluded']} excluded by keywords, "
+                   f"{stats['role_filtered']} filtered by role requirement, {stats['passed']} passed all filters")
+        
         if not filtered_contacts:
             logger.info(f"No contacts matched {tier_config['name']} criteria")
             return pd.DataFrame()
         
         # Convert back to DataFrame
         filtered_df = pd.DataFrame(filtered_contacts)
+        logger.info(f"  Contacts matching criteria (before firm limits): {len(filtered_df)}")
         
         # Apply firm-based limits with priority ranking
         final_contacts = []
@@ -1038,8 +1054,9 @@ class TieredFilter:
                 firm_counts[firm] += 1
         
         result_df = pd.DataFrame(final_contacts) if final_contacts else pd.DataFrame()
+        unique_firms = len(set(row.get('INVESTOR', '') for row in final_contacts))
         
-        logger.info(f"{tier_config['name']} result: {len(result_df)} contacts")
+        logger.info(f"{tier_config['name']} result: {len(result_df)} contacts across {unique_firms} firms")
         return result_df
     
     def fill_missing_emails(self, df: pd.DataFrame, email_patterns: Dict[str, List[str]]) -> pd.DataFrame:
@@ -1144,158 +1161,204 @@ class TieredFilter:
                     rescued_reordered = rescued_df
                 rescued_reordered.to_excel(writer, sheet_name='Tier3_Rescued_Contacts', index=False)
             
-            # Only write analytics sheets if contact_lists_only is False
+            # Always create Processing Summary sheet
+            # Processing summary
+            total_raw = sum(info.get('contacts', 0) for info in file_info)
+            
+            # Calculate firm/institution counts and statistics
+            raw_firms = set()
+            for info in file_info:
+                # Estimate firms from file info if available
+                if 'firms' in info:
+                    raw_firms.update(info['firms'])
+        
+            # Calculate unique firms after deduplication
+            unique_firms_after_dedup = 0
+            avg_contacts_per_firm_before = 0
+            median_contacts_per_firm_before = 0
+        
+            if deduplicated_df is not None and 'INVESTOR' in deduplicated_df.columns and len(deduplicated_df) > 0:
+                unique_firms_after_dedup = deduplicated_df['INVESTOR'].nunique()
+                
+                # Calculate average and median contacts per firm before filtering
+                firm_contact_counts_before = deduplicated_df['INVESTOR'].value_counts()
+                avg_contacts_per_firm_before = firm_contact_counts_before.mean()
+                median_contacts_per_firm_before = firm_contact_counts_before.median()
+        
+            # Calculate tier-specific firm counts and statistics
+            tier1_firms = tier1_df['INVESTOR'].nunique() if 'INVESTOR' in tier1_df.columns and len(tier1_df) > 0 else 0
+            tier2_firms = tier2_df['INVESTOR'].nunique() if 'INVESTOR' in tier2_df.columns and len(tier2_df) > 0 else 0
+        
+            # Calculate tier-specific averages and medians
+            avg_contacts_per_firm_tier1 = 0
+            median_contacts_per_firm_tier1 = 0
+            avg_contacts_per_firm_tier2 = 0
+            median_contacts_per_firm_tier2 = 0
+        
+            if len(tier1_df) > 0 and 'INVESTOR' in tier1_df.columns:
+                tier1_firm_counts = tier1_df['INVESTOR'].value_counts()
+                avg_contacts_per_firm_tier1 = tier1_firm_counts.mean()
+                median_contacts_per_firm_tier1 = tier1_firm_counts.median()
+            
+            if len(tier2_df) > 0 and 'INVESTOR' in tier2_df.columns:
+                tier2_firm_counts = tier2_df['INVESTOR'].value_counts()
+                avg_contacts_per_firm_tier2 = tier2_firm_counts.mean()
+                median_contacts_per_firm_tier2 = tier2_firm_counts.median()
+            
+            # Calculate unique firms across both tiers (avoiding double counting)
+            if len(tier1_df) > 0 and len(tier2_df) > 0 and 'INVESTOR' in tier1_df.columns and 'INVESTOR' in tier2_df.columns:
+                all_tier_firms = set(tier1_df['INVESTOR'].dropna().unique()) | set(tier2_df['INVESTOR'].dropna().unique())
+                total_firms_filtered = len(all_tier_firms)
+            else:
+                total_firms_filtered = tier1_firms + tier2_firms
+            
+            # Calculate firm exclusion statistics
+            firms_excluded_count = 0
+            contacts_excluded_count = 0
+            if hasattr(self, 'enable_firm_exclusion') and self.enable_firm_exclusion and hasattr(self, 'excluded_firms'):
+                firms_excluded_count = len(self.excluded_firms)
+                # Calculate contacts excluded: difference between before and after exclusion
+                if hasattr(self, 'pre_exclusion_count'):
+                    contacts_excluded_count = self.pre_exclusion_count - len(deduplicated_df) if deduplicated_df is not None else 0
+        
+            # Calculate contact inclusion statistics
+            contacts_included_count = 0
+            contacts_forced_included = 0
+            if hasattr(self, 'enable_contact_inclusion') and self.enable_contact_inclusion and hasattr(self, 'included_contacts'):
+                contacts_included_count = len(self.included_contacts)
+                # This would need to be tracked during inclusion process
+                # For now, we'll calculate based on whether contacts were found
+                contacts_forced_included = getattr(self, 'contacts_forced_included', 0)
+        
+            # Get tier configurations for settings display
+            tier1_config = getattr(self, '_last_tier1_config', None) or self.create_tier1_config()
+            tier2_config = getattr(self, '_last_tier2_config', None) or self.create_tier2_config()
+            
+            # Determine if include_all_firms was used (check if rescued_df exists and has data)
+            include_all_firms_used = (rescue_stats is not None and rescue_stats.get('rescued_contacts', 0) > 0) or (rescued_df is not None and len(rescued_df) > 0)
+            
+            # Get tier 3 limit if available
+            tier3_limit = getattr(self, 'tier3_limit', 3) if include_all_firms_used else None
+            
+            # Build step and count lists
+            step_list = [
+                '📁 Input Files',
+                '📊 Total Raw Contacts',
+                '✅ Unique Contacts After Deduplication',
+                '🏢 Unique Firms/Institutions After Deduplication',
+                '📊 Avg Contacts per Firm (Before Filtering)',
+                '📊 Median Contacts per Firm (Before Filtering)',
+                '—',
+                '⚙️ FILTERING SETTINGS',
+                '⚙️ Tier 1 Max Contacts per Firm',
+                '⚙️ Tier 2 Max Contacts per Firm',
+            ]
+            count_list = [
+                len(file_info),
+                f"{total_raw:,}",
+                f"{dedup_count:,}",
+                f"{unique_firms_after_dedup:,}",
+                f"{avg_contacts_per_firm_before:.1f}",
+                f"{median_contacts_per_firm_before:.1f}",
+                '—',
+                '',  # Section header
+                f"{self.tier1_limit}",
+                f"{self.tier2_limit}",
+            ]
+            
+            # Add Tier 3 limit if applicable
+            if include_all_firms_used:
+                step_list.append('⚙️ Tier 3 Max Contacts per Firm')
+                count_list.append(f"{tier3_limit}")
+            
+            # Continue with remaining settings
+            step_list.extend([
+                '⚙️ Email Discovery Enabled',
+                '⚙️ Firm Exclusion Enabled',
+                '⚙️ Contact Inclusion Enabled',
+                '⚙️ Include All Firms (Rescue) Enabled',
+                '⚙️ Tier 1 Requires Investment Team',
+                '⚙️ Tier 2 Requires Investment Team',
+                '—',
+                '🚫 Firm Exclusion Applied',
+                '🚫 Firms Excluded',
+                '🚫 Contacts Excluded by Firm Filter',
+                '—',
+                '✅ Contact Inclusion Applied',
+                '✅ Contacts in Inclusion List',
+                '✅ Contacts Forced Through Filters',
+                '—',
+                '🎯 Tier 1 (Key Contacts)',
+                '🏢 Tier 1 Firms/Institutions',
+                '📊 Avg Contacts per Firm (Tier 1)',
+                '📊 Median Contacts per Firm (Tier 1)',
+                '🎯 Tier 2 (Junior Contacts)',
+                '🏢 Tier 2 Firms/Institutions', 
+                '📊 Avg Contacts per Firm (Tier 2)',
+                '📊 Median Contacts per Firm (Tier 2)',
+                '📈 Total Filtered Contacts',
+                '🏢 Total Firms/Institutions (Both Tiers)',
+                '📊 Retention Rate',
+                '—',
+                '📧 Tier 1 Emails Available',
+                '📧 Tier 2 Emails Available',
+                '—',
+                '🚁 Firm Rescue Applied',
+                '🚁 Firms Rescued',
+                '🚁 Contacts Rescued',
+                '🚁 Firm Rescue Rate',
+                '—',
+                '📅 Processing Date'
+            ])
+            count_list.extend([
+                "Yes" if (hasattr(self, 'enable_find_emails') and self.enable_find_emails) else "No",
+                "Yes" if (hasattr(self, 'enable_firm_exclusion') and self.enable_firm_exclusion) else "No",
+                "Yes" if (hasattr(self, 'enable_contact_inclusion') and self.enable_contact_inclusion) else "No",
+                "Yes" if include_all_firms_used else "No",
+                "Yes" if tier1_config.get('require_investment_team', False) else "No",
+                "Yes" if tier2_config.get('require_investment_team', False) else "No",
+                '—',
+                "Yes" if (hasattr(self, 'enable_firm_exclusion') and self.enable_firm_exclusion) else "No",
+                f"{firms_excluded_count:,}" if (hasattr(self, 'enable_firm_exclusion') and self.enable_firm_exclusion) else "0",
+                f"{contacts_excluded_count:,}" if (hasattr(self, 'enable_firm_exclusion') and self.enable_firm_exclusion) else "0",
+                '—',
+                "Yes" if (hasattr(self, 'enable_contact_inclusion') and self.enable_contact_inclusion) else "No",
+                f"{contacts_included_count:,}" if (hasattr(self, 'enable_contact_inclusion') and self.enable_contact_inclusion) else "0",
+                f"{contacts_forced_included:,}" if (hasattr(self, 'enable_contact_inclusion') and self.enable_contact_inclusion) else "0",
+                '—',
+                f"{len(tier1_df):,}",
+                f"{tier1_firms:,}",
+                f"{avg_contacts_per_firm_tier1:.1f}",
+                f"{median_contacts_per_firm_tier1:.1f}",
+                f"{len(tier2_df):,}",
+                f"{tier2_firms:,}",
+                f"{avg_contacts_per_firm_tier2:.1f}",
+                f"{median_contacts_per_firm_tier2:.1f}",
+                f"{len(tier1_df) + len(tier2_df):,}",
+                f"{total_firms_filtered:,}",
+                f"{((len(tier1_df) + len(tier2_df)) / total_raw * 100):.1f}%" if total_raw > 0 else "0.0%",
+                '—',
+                f"{tier1_df['EMAIL'].notna().sum():,}" if len(tier1_df) > 0 and 'EMAIL' in tier1_df.columns else "0",
+                f"{tier2_df['EMAIL'].notna().sum():,}" if len(tier2_df) > 0 and 'EMAIL' in tier2_df.columns else "0",
+                '—',
+                "Yes" if (rescue_stats and rescue_stats.get('rescued_contacts', 0) > 0) else "No",
+                f"{rescue_stats.get('rescued_firms', 0):,}" if rescue_stats else "0",
+                f"{rescue_stats.get('rescued_contacts', 0):,}" if rescue_stats else "0",
+                f"{rescue_stats.get('rescue_rate', 0):.1f}%" if rescue_stats else "0.0%",
+                '—',
+                datetime.now().strftime("%Y-%m-%d")
+            ])
+            
+            summary_data = {
+                'Step': step_list,
+                'Count': count_list
+            }
+        
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_excel(writer, sheet_name='Processing_Summary', index=False)
+        
+            # Only write other analytics sheets if contact_lists_only is False
             if not contact_lists_only:
-                # Processing summary
-                total_raw = sum(info['contacts'] for info in file_info)
-                
-                # Calculate firm/institution counts and statistics
-                raw_firms = set()
-                for info in file_info:
-                    # Estimate firms from file info if available
-                    if 'firms' in info:
-                        raw_firms.update(info['firms'])
-            
-                # Calculate unique firms after deduplication
-                unique_firms_after_dedup = 0
-                avg_contacts_per_firm_before = 0
-                median_contacts_per_firm_before = 0
-            
-                if deduplicated_df is not None and 'INVESTOR' in deduplicated_df.columns and len(deduplicated_df) > 0:
-                    unique_firms_after_dedup = deduplicated_df['INVESTOR'].nunique()
-                    
-                    # Calculate average and median contacts per firm before filtering
-                    firm_contact_counts_before = deduplicated_df['INVESTOR'].value_counts()
-                    avg_contacts_per_firm_before = firm_contact_counts_before.mean()
-                    median_contacts_per_firm_before = firm_contact_counts_before.median()
-            
-                # Calculate tier-specific firm counts and statistics
-                tier1_firms = tier1_df['INVESTOR'].nunique() if 'INVESTOR' in tier1_df.columns and len(tier1_df) > 0 else 0
-                tier2_firms = tier2_df['INVESTOR'].nunique() if 'INVESTOR' in tier2_df.columns and len(tier2_df) > 0 else 0
-            
-                # Calculate tier-specific averages and medians
-                avg_contacts_per_firm_tier1 = 0
-                median_contacts_per_firm_tier1 = 0
-                avg_contacts_per_firm_tier2 = 0
-                median_contacts_per_firm_tier2 = 0
-            
-                if len(tier1_df) > 0 and 'INVESTOR' in tier1_df.columns:
-                    tier1_firm_counts = tier1_df['INVESTOR'].value_counts()
-                    avg_contacts_per_firm_tier1 = tier1_firm_counts.mean()
-                    median_contacts_per_firm_tier1 = tier1_firm_counts.median()
-                
-                if len(tier2_df) > 0 and 'INVESTOR' in tier2_df.columns:
-                    tier2_firm_counts = tier2_df['INVESTOR'].value_counts()
-                    avg_contacts_per_firm_tier2 = tier2_firm_counts.mean()
-                    median_contacts_per_firm_tier2 = tier2_firm_counts.median()
-                
-                # Calculate unique firms across both tiers (avoiding double counting)
-                if len(tier1_df) > 0 and len(tier2_df) > 0 and 'INVESTOR' in tier1_df.columns and 'INVESTOR' in tier2_df.columns:
-                    all_tier_firms = set(tier1_df['INVESTOR'].dropna().unique()) | set(tier2_df['INVESTOR'].dropna().unique())
-                    total_firms_filtered = len(all_tier_firms)
-                else:
-                    total_firms_filtered = tier1_firms + tier2_firms
-                
-                # Calculate firm exclusion statistics
-                firms_excluded_count = 0
-                contacts_excluded_count = 0
-                if self.enable_firm_exclusion and hasattr(self, 'excluded_firms'):
-                    firms_excluded_count = len(self.excluded_firms)
-                    # Calculate contacts excluded: difference between before and after exclusion
-                    if hasattr(self, 'pre_exclusion_count'):
-                        contacts_excluded_count = self.pre_exclusion_count - len(deduplicated_df) if deduplicated_df is not None else 0
-            
-                # Calculate contact inclusion statistics
-                contacts_included_count = 0
-                contacts_forced_included = 0
-                if self.enable_contact_inclusion and hasattr(self, 'included_contacts'):
-                    contacts_included_count = len(self.included_contacts)
-                    # This would need to be tracked during inclusion process
-                    # For now, we'll calculate based on whether contacts were found
-                    contacts_forced_included = getattr(self, 'contacts_forced_included', 0)
-            
-                summary_data = {
-                'Step': [
-                    '📁 Input Files',
-                    '📊 Total Raw Contacts',
-                    '✅ Unique Contacts After Deduplication',
-                    '🏢 Unique Firms/Institutions After Deduplication',
-                    '📊 Avg Contacts per Firm (Before Filtering)',
-                    '📊 Median Contacts per Firm (Before Filtering)',
-                    '—',
-                    '🚫 Firm Exclusion Applied',
-                    '🚫 Firms Excluded',
-                    '🚫 Contacts Excluded by Firm Filter',
-                    '—',
-                    '✅ Contact Inclusion Applied',
-                    '✅ Contacts in Inclusion List',
-                    '✅ Contacts Forced Through Filters',
-                    '—',
-                    '🎯 Tier 1 (Key Contacts)',
-                    '🏢 Tier 1 Firms/Institutions',
-                    '📊 Avg Contacts per Firm (Tier 1)',
-                    '📊 Median Contacts per Firm (Tier 1)',
-                    '🎯 Tier 2 (Junior Contacts)',
-                    '🏢 Tier 2 Firms/Institutions', 
-                    '📊 Avg Contacts per Firm (Tier 2)',
-                    '📊 Median Contacts per Firm (Tier 2)',
-                    '📈 Total Filtered Contacts',
-                    '🏢 Total Firms/Institutions (Both Tiers)',
-                    '📊 Retention Rate',
-                    '—',
-                    '📧 Tier 1 Emails Available',
-                    '📧 Tier 2 Emails Available',
-                    '—',
-                    '🚁 Firm Rescue Applied',
-                    '🚁 Firms Rescued',
-                    '🚁 Contacts Rescued',
-                    '🚁 Firm Rescue Rate',
-                    '—',
-                    '📅 Processing Date'
-                ],
-                'Count': [
-                    len(file_info),
-                    f"{total_raw:,}",
-                    f"{dedup_count:,}",
-                    f"{unique_firms_after_dedup:,}",
-                    f"{avg_contacts_per_firm_before:.1f}",
-                    f"{median_contacts_per_firm_before:.1f}",
-                    '—',
-                    "Yes" if self.enable_firm_exclusion else "No",
-                    f"{firms_excluded_count:,}" if self.enable_firm_exclusion else "0",
-                    f"{contacts_excluded_count:,}" if self.enable_firm_exclusion else "0",
-                    '—',
-                    "Yes" if self.enable_contact_inclusion else "No",
-                    f"{contacts_included_count:,}" if self.enable_contact_inclusion else "0",
-                    f"{contacts_forced_included:,}" if self.enable_contact_inclusion else "0",
-                    '—',
-                    f"{len(tier1_df):,}",
-                    f"{tier1_firms:,}",
-                    f"{avg_contacts_per_firm_tier1:.1f}",
-                    f"{median_contacts_per_firm_tier1:.1f}",
-                    f"{len(tier2_df):,}",
-                    f"{tier2_firms:,}",
-                    f"{avg_contacts_per_firm_tier2:.1f}",
-                    f"{median_contacts_per_firm_tier2:.1f}",
-                    f"{len(tier1_df) + len(tier2_df):,}",
-                    f"{total_firms_filtered:,}",
-                    f"{((len(tier1_df) + len(tier2_df)) / total_raw * 100):.1f}%" if total_raw > 0 else "0.0%",
-                    '—',
-                    f"{tier1_df['EMAIL'].notna().sum():,}" if len(tier1_df) > 0 else "0",
-                    f"{tier2_df['EMAIL'].notna().sum():,}" if len(tier2_df) > 0 else "0",
-                    '—',
-                    "Yes" if (rescue_stats and rescue_stats.get('rescued_contacts', 0) > 0) else "No",
-                    f"{rescue_stats.get('rescued_firms', 0):,}" if rescue_stats else "0",
-                    f"{rescue_stats.get('rescued_contacts', 0):,}" if rescue_stats else "0",
-                    f"{rescue_stats.get('rescue_rate', 0):.1f}%" if rescue_stats else "0.0%",
-                    '—',
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                ]
-                }
-            
-                summary_df = pd.DataFrame(summary_data)
-                summary_df.to_excel(writer, sheet_name='Processing_Summary', index=False)
-            
                 # Input file details
                 file_details_df = pd.DataFrame(file_info)
                 file_details_df.to_excel(writer, sheet_name='Input_File_Details', index=False)

@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     port: 3000,
     host: '0.0.0.0',
+    allowedHosts: ['blackbox.pv.local', 'localhost'],
     proxy: {
       '/api': {
         // In Docker, use service name; locally use localhost

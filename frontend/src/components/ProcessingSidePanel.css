@@ -16,7 +16,8 @@
 .processing-bar.pending,
 .processing-bar.processing,
 .processing-bar.completed,
-.processing-bar.failed {
+.processing-bar.failed,
+.processing-bar.cancelled {
   transform: translateY(0);
 }
 
@@ -28,6 +29,11 @@
 .processing-bar.failed {
   border-bottom-color: var(--color-error);
   background-color: rgba(255, 59, 48, 0.08);
+}
+
+.processing-bar.cancelled {
+  border-bottom-color: var(--color-text-secondary);
+  background-color: rgba(142, 142, 147, 0.08);
 }
 
 .processing-bar-content {
@@ -136,6 +142,26 @@
   color: var(--color-text);
 }
 
+.processing-bar-cancel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.processing-bar-cancel:hover {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-text-secondary);
+}
+
 /* Adjust main content to account for bar */
 .process-page {
   padding-top: 0;
@@ -145,7 +171,8 @@
 .process-page:has(.processing-bar.pending),
 .process-page:has(.processing-bar.processing),
 .process-page:has(.processing-bar.completed),
-.process-page:has(.processing-bar.failed) {
+.process-page:has(.processing-bar.failed),
+.process-page:has(.processing-bar.cancelled) {
   padding-top: 48px;
 }
 

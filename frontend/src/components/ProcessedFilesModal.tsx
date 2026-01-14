@@ -26,24 +26,20 @@ export default function ProcessedFilesModal({ isOpen, onClose, onSelectFile }: P
     setIsLoading(true);
     try {
       const jobsData = await listJobs(100);
-      console.log('Loaded jobs:', jobsData.length);
-      console.log('Sample job:', jobsData[0]);
       
       // Filter to only completed jobs with output_filename
       const completedJobs = jobsData
         .filter(job => {
-          const hasOutput = job.status === 'completed' && job.output_filename;
-          if (!hasOutput && job.status === 'completed') {
-            console.log('Job missing output_filename:', job.id, job);
-          }
-          return hasOutput;
+          return job.status === 'completed' && job.output_filename;
         })
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       
-      console.log('Completed jobs with output:', completedJobs.length);
       setJobs(completedJobs);
     } catch (error) {
-      console.error('Failed to load processed jobs:', error);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Failed to load processed jobs:', error);
+      }
       setJobs([]);
     } finally {
       setIsLoading(false);
@@ -71,7 +67,10 @@ export default function ProcessedFilesModal({ isOpen, onClose, onSelectFile }: P
       onClose();
       setSelectedJobId(null);
     } catch (error) {
-      console.error('Failed to download file:', error);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Failed to download file:', error);
+      }
       alert('Failed to download processed file. Please try again.');
     } finally {
       setIsDownloading(false);

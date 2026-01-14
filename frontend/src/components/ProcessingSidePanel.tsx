@@ -2,12 +2,13 @@ import { useEffect } from 'react';
 import './ProcessingSidePanel.css';
 
 interface ProcessingSidePanelProps {
-  status: 'pending' | 'processing' | 'completed' | 'failed' | null;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | null;
   jobId: string | null;
   onClose?: () => void;
+  onCancel?: () => void;
 }
 
-export default function ProcessingSidePanel({ status, jobId, onClose }: ProcessingSidePanelProps) {
+export default function ProcessingSidePanel({ status, jobId, onClose, onCancel }: ProcessingSidePanelProps) {
   useEffect(() => {
     // Auto-close after 5 seconds if completed
     if (status === 'completed' && onClose) {
@@ -25,6 +26,7 @@ export default function ProcessingSidePanel({ status, jobId, onClose }: Processi
     processing: 'Processing contacts...',
     completed: 'Processing completed!',
     failed: 'Processing failed',
+    cancelled: 'Processing cancelled',
   };
 
   const statusIcons = {
@@ -32,6 +34,7 @@ export default function ProcessingSidePanel({ status, jobId, onClose }: Processi
     processing: '⚙️',
     completed: '✅',
     failed: '❌',
+    cancelled: '🚫',
   };
 
   return (
@@ -47,6 +50,15 @@ export default function ProcessingSidePanel({ status, jobId, onClose }: Processi
           )}
         </div>
         <div className="processing-bar-right">
+          {status === 'processing' && onCancel && (
+            <button 
+              className="processing-bar-cancel" 
+              onClick={onCancel} 
+              aria-label="Cancel"
+            >
+              Cancel
+            </button>
+          )}
           {status === 'completed' && (
             <a href={`/analytics/${jobId}`} className="processing-bar-link">
               View Analytics →

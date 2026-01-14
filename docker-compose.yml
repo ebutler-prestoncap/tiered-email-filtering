@@ -31,7 +31,7 @@ services:
       dockerfile: Dockerfile
     container_name: tiered-filtering-frontend
     ports:
-      - "3000:3000"
+      - "5670:3000"
     volumes:
       # Mount code for development (hot reload)
       - ./frontend:/app

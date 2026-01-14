@@ -168,9 +168,24 @@ class Database:
                     excluded_firms_list TEXT,
                     included_firms_list TEXT,
                     excluded_firm_contacts_count INTEGER,
+                    is_separated_by_firm_type INTEGER DEFAULT 0,
+                    firm_type_breakdown TEXT,
+                    files_in_zip TEXT,
                     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
                 )
             """)
+
+            # Add new columns to existing analytics table if they don't exist
+            # SQLite doesn't support IF NOT EXISTS for columns, so we check first
+            cursor.execute("PRAGMA table_info(analytics)")
+            existing_columns = {row[1] for row in cursor.fetchall()}
+
+            if 'is_separated_by_firm_type' not in existing_columns:
+                cursor.execute("ALTER TABLE analytics ADD COLUMN is_separated_by_firm_type INTEGER DEFAULT 0")
+            if 'firm_type_breakdown' not in existing_columns:
+                cursor.execute("ALTER TABLE analytics ADD COLUMN firm_type_breakdown TEXT")
+            if 'files_in_zip' not in existing_columns:
+                cursor.execute("ALTER TABLE analytics ADD COLUMN files_in_zip TEXT")
             
             # Settings presets table
             cursor.execute("""
@@ -194,6 +209,21 @@ class Database:
                     last_used_at TIMESTAMP
                 )
             """)
+
+            # Removal lists table - stores account and contact removal lists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS removal_lists (
+                    id TEXT PRIMARY KEY,
+                    list_type TEXT NOT NULL,
+                    original_name TEXT NOT NULL,
+                    stored_path TEXT NOT NULL,
+                    file_size INTEGER,
+                    entry_count INTEGER DEFAULT 0,
+                    is_active INTEGER DEFAULT 1,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at TIMESTAMP
+                )
+            """)
             
             # Create indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at)")
@@ -201,6 +231,8 @@ class Database:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_presets_default ON settings_presets(is_default)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_uploaded_files_uploaded_at ON uploaded_files(uploaded_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_uploaded_files_last_used ON uploaded_files(last_used_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_removal_lists_type ON removal_lists(list_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_removal_lists_active ON removal_lists(is_active)")
         
         try:
             with self.get_connection() as conn:
@@ -339,8 +371,9 @@ class Database:
                 INSERT OR REPLACE INTO analytics (
                     job_id, processing_summary, input_file_details, delta_analysis,
                     delta_summary, filter_breakdown, excluded_firms_summary,
-                    excluded_firms_list, included_firms_list, excluded_firm_contacts_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    excluded_firms_list, included_firms_list, excluded_firm_contacts_count,
+                    is_separated_by_firm_type, firm_type_breakdown, files_in_zip
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 job_id,
                 json.dumps(analytics.get("processing_summary")),
@@ -351,7 +384,10 @@ class Database:
                 json.dumps(analytics.get("excluded_firms_summary")),
                 json.dumps(analytics.get("excluded_firms_list", [])),
                 json.dumps(analytics.get("included_firms_list", [])),
-                analytics.get("excluded_firm_contacts_count", 0)
+                analytics.get("excluded_firm_contacts_count", 0),
+                1 if analytics.get("is_separated_by_firm_type") else 0,
+                json.dumps(analytics.get("firm_type_breakdown")),
+                json.dumps(analytics.get("files_in_zip"))
             ))
         
         try:
@@ -391,6 +427,10 @@ class Database:
                 analytics["excluded_firms_summary"] = json.loads(analytics["excluded_firms_summary"]) if analytics["excluded_firms_summary"] else None
                 analytics["excluded_firms_list"] = json.loads(analytics["excluded_firms_list"]) if analytics["excluded_firms_list"] else []
                 analytics["included_firms_list"] = json.loads(analytics["included_firms_list"]) if analytics["included_firms_list"] else []
+                # Firm type separation fields
+                analytics["is_separated_by_firm_type"] = bool(analytics.get("is_separated_by_firm_type", 0))
+                analytics["firm_type_breakdown"] = json.loads(analytics["firm_type_breakdown"]) if analytics.get("firm_type_breakdown") else None
+                analytics["files_in_zip"] = json.loads(analytics["files_in_zip"]) if analytics.get("files_in_zip") else None
                 job["analytics"] = analytics
             else:
                 job["analytics"] = None
@@ -646,7 +686,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM uploaded_files WHERE id = ?", (file_id,))
             return cursor.rowcount > 0
-        
+
         try:
             with self.get_connection() as conn:
                 deleted = self._execute_with_retry(lambda: _delete_file(conn))
@@ -656,7 +696,150 @@ class Database:
         except Exception as e:
             logger.error(f"Failed to delete uploaded file {file_id}: {e}")
             raise
-    
+
+    # Removal list methods
+    def save_removal_list(self, list_id: str, list_type: str, original_name: str,
+                          stored_path: str, file_size: int, entry_count: int) -> None:
+        """Save removal list metadata. Deactivates any existing list of the same type."""
+        def _save_list(conn):
+            cursor = conn.cursor()
+            # Deactivate existing lists of the same type
+            cursor.execute("""
+                UPDATE removal_lists SET is_active = 0 WHERE list_type = ?
+            """, (list_type,))
+            # Insert new list as active
+            cursor.execute("""
+                INSERT INTO removal_lists (id, list_type, original_name, stored_path, file_size, entry_count, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
+            """, (list_id, list_type, original_name, stored_path, file_size, entry_count))
+
+        try:
+            with self.get_connection() as conn:
+                self._execute_with_retry(lambda: _save_list(conn))
+            logger.debug(f"Saved removal list: {list_id} ({list_type})")
+        except Exception as e:
+            logger.error(f"Failed to save removal list {list_id}: {e}")
+            raise
+
+    def get_active_removal_list(self, list_type: str) -> Optional[Dict]:
+        """Get the active removal list of a given type"""
+        def _get_list(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM removal_lists
+                WHERE list_type = ? AND is_active = 1
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            """, (list_type,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+        try:
+            with self.get_connection() as conn:
+                return _get_list(conn)
+        except Exception as e:
+            logger.error(f"Failed to get active removal list for {list_type}: {e}")
+            raise
+
+    def list_removal_lists(self, list_type: Optional[str] = None, limit: int = 50) -> List[Dict]:
+        """List removal lists, optionally filtered by type"""
+        def _list_lists(conn):
+            cursor = conn.cursor()
+            if list_type:
+                cursor.execute("""
+                    SELECT id, list_type, original_name, stored_path, file_size, entry_count,
+                           is_active, uploaded_at, last_used_at
+                    FROM removal_lists
+                    WHERE list_type = ?
+                    ORDER BY uploaded_at DESC
+                    LIMIT ?
+                """, (list_type, limit))
+            else:
+                cursor.execute("""
+                    SELECT id, list_type, original_name, stored_path, file_size, entry_count,
+                           is_active, uploaded_at, last_used_at
+                    FROM removal_lists
+                    ORDER BY uploaded_at DESC
+                    LIMIT ?
+                """, (limit,))
+
+            lists = []
+            for row in cursor.fetchall():
+                list_dict = dict(row)
+                list_dict['is_active'] = bool(list_dict['is_active'])
+                lists.append(list_dict)
+            return lists
+
+        try:
+            with self.get_connection() as conn:
+                return _list_lists(conn)
+        except Exception as e:
+            logger.error(f"Failed to list removal lists: {e}")
+            raise
+
+    def update_removal_list_active(self, list_id: str, is_active: bool) -> bool:
+        """Activate or deactivate a removal list"""
+        def _update_active(conn):
+            cursor = conn.cursor()
+            if is_active:
+                # If activating, first deactivate other lists of the same type
+                cursor.execute("SELECT list_type FROM removal_lists WHERE id = ?", (list_id,))
+                row = cursor.fetchone()
+                if row:
+                    cursor.execute("""
+                        UPDATE removal_lists SET is_active = 0 WHERE list_type = ?
+                    """, (row['list_type'],))
+
+            cursor.execute("""
+                UPDATE removal_lists SET is_active = ? WHERE id = ?
+            """, (1 if is_active else 0, list_id))
+            return cursor.rowcount > 0
+
+        try:
+            with self.get_connection() as conn:
+                updated = self._execute_with_retry(lambda: _update_active(conn))
+            if updated:
+                logger.debug(f"Updated removal list {list_id} active status to {is_active}")
+            return updated
+        except Exception as e:
+            logger.error(f"Failed to update removal list {list_id}: {e}")
+            raise
+
+    def update_removal_list_last_used(self, list_id: str) -> None:
+        """Update last_used_at timestamp for a removal list"""
+        def _update_timestamp(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE removal_lists
+                SET last_used_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (list_id,))
+
+        try:
+            with self.get_connection() as conn:
+                self._execute_with_retry(lambda: _update_timestamp(conn))
+            logger.debug(f"Updated last_used_at for removal list: {list_id}")
+        except Exception as e:
+            logger.error(f"Failed to update last_used_at for removal list {list_id}: {e}")
+            raise
+
+    def delete_removal_list(self, list_id: str) -> bool:
+        """Delete a removal list"""
+        def _delete_list(conn):
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM removal_lists WHERE id = ?", (list_id,))
+            return cursor.rowcount > 0
+
+        try:
+            with self.get_connection() as conn:
+                deleted = self._execute_with_retry(lambda: _delete_list(conn))
+            if deleted:
+                logger.debug(f"Deleted removal list: {list_id}")
+            return deleted
+        except Exception as e:
+            logger.error(f"Failed to delete removal list {list_id}: {e}")
+            raise
+
     def verify_database_integrity(self) -> Dict[str, Any]:
         """
         Verify database integrity using SQLite's integrity check.
@@ -756,9 +939,14 @@ class Database:
                         health["writable"] = True
                         
                         # Get table counts
-                        tables = ["jobs", "analytics", "settings_presets", "uploaded_files"]
-                        for table in tables:
+                        # Whitelist of valid table names to prevent SQL injection
+                        valid_tables = ["jobs", "analytics", "settings_presets", "uploaded_files", "removal_lists"]
+                        for table in valid_tables:
                             try:
+                                # Validate table name against whitelist before using in query
+                                if table not in valid_tables:
+                                    continue
+                                # SQLite doesn't support parameterized table names, so we use whitelist validation
                                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
                                 count = cursor.fetchone()[0]
                                 health["table_counts"][table] = count

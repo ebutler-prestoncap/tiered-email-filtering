@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getJob, downloadResults, createPreset } from '../services/api';
-import type { Job } from '../types';
+import { getJob, downloadResults, createPreset, downloadIndividualFile } from '../services/api';
+import type { Job, FirmTypeBreakdownEntry, FileInZipEntry } from '../types';
 import './AnalyticsPage.css';
 
 export default function AnalyticsPage() {
@@ -14,6 +14,7 @@ export default function AnalyticsPage() {
   const [presetName, setPresetName] = useState('');
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetSaveMessage, setPresetSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [expandedFirmType, setExpandedFirmType] = useState<string | null>(null);
 
   useEffect(() => {
     if (jobId) {
@@ -41,32 +42,36 @@ export default function AnalyticsPage() {
     }
   };
 
+  const getTimestamp = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+  };
+
   const handleDownload = async () => {
     if (!jobId) return;
-    
+
     try {
       const blob = await downloadResults(jobId);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      
+
       // Generate filename using same method as CSV exports (user prefix from settings)
       const prefix = getUserPrefix();
-      // Get timestamp from job creation date or use current date (format: YYYYMMDD_HHMMSS)
-      const getTimestamp = (date: Date): string => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        const seconds = String(date.getSeconds()).padStart(2, '0');
-        return `${year}${month}${day}_${hours}${minutes}${seconds}`;
-      };
-      const timestamp = job?.created_at 
+      const timestamp = job?.created_at
         ? getTimestamp(new Date(job.created_at))
         : getTimestamp(new Date());
-      a.download = `${prefix}_${timestamp}.xlsx`;
-      
+
+      // Determine file extension based on whether it's a separated job
+      const isSeparated = job?.analytics?.is_separated_by_firm_type || job?.settings?.separateByFirmType;
+      const extension = isSeparated ? '.zip' : '.xlsx';
+      a.download = `${prefix}_${timestamp}${extension}`;
+
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -76,6 +81,27 @@ export default function AnalyticsPage() {
       // Error logged to console for debugging in development
       if (import.meta.env.DEV) {
         console.error('Download error:', err);
+      }
+    }
+  };
+
+  const handleDownloadIndividualFile = async (filename: string) => {
+    if (!jobId) return;
+
+    try {
+      const blob = await downloadIndividualFile(jobId, filename);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      alert('Failed to download file');
+      if (import.meta.env.DEV) {
+        console.error('Download individual file error:', err);
       }
     }
   };
@@ -318,7 +344,7 @@ export default function AnalyticsPage() {
                 Save as Preset
               </button>
               <button className="download-button" onClick={handleDownload}>
-                Download Excel
+                {(analytics?.is_separated_by_firm_type || job.settings?.separateByFirmType) ? 'Download All (ZIP)' : 'Download Excel'}
               </button>
             </>
           )}
@@ -449,6 +475,115 @@ export default function AnalyticsPage() {
               )}
             </div>
           </section>
+
+          {/* Firm Type Breakdown Section - for separated firm type jobs */}
+          {(analytics?.is_separated_by_firm_type || job.settings?.separateByFirmType) && (
+            <section className="details-section firm-type-section">
+              <h2>Output Files by Firm Type</h2>
+              {analytics?.firm_type_breakdown && analytics.firm_type_breakdown.length > 0 ? (
+                <>
+                  <p className="section-description">
+                    Your results have been separated into {analytics.firm_type_breakdown.length} files by firm type.
+                    Click a card to view details, or download individual files.
+                  </p>
+                  <div className="firm-type-grid">
+                    {analytics.firm_type_breakdown.map((entry: FirmTypeBreakdownEntry) => {
+                      const fileEntry = analytics.files_in_zip?.find(
+                        (f: FileInZipEntry) => f.firmTypeGroup === entry.firmTypeGroup
+                      );
+                      const isExpanded = expandedFirmType === entry.firmTypeGroup;
+                      const percentOfTotal = summary ? ((entry.totalContacts / summary.total_filtered_contacts) * 100).toFixed(1) : '0';
+
+                      return (
+                        <div
+                          key={entry.firmTypeGroup}
+                          className={`firm-type-card ${isExpanded ? 'expanded' : ''}`}
+                          onClick={() => setExpandedFirmType(isExpanded ? null : entry.firmTypeGroup)}
+                        >
+                          <div className="firm-type-header">
+                            <div className="firm-type-name">{entry.displayName}</div>
+                            <div className="firm-type-total">{entry.totalContacts.toLocaleString()} contacts</div>
+                          </div>
+                          <div className="firm-type-breakdown">
+                            <div className="tier-count">
+                              <span className="tier-label">Tier 1:</span>
+                              <span className="tier-value">{entry.tier1Contacts.toLocaleString()}</span>
+                            </div>
+                            <div className="tier-count">
+                              <span className="tier-label">Tier 2:</span>
+                              <span className="tier-value">{entry.tier2Contacts.toLocaleString()}</span>
+                            </div>
+                            {entry.tier3Contacts > 0 && (
+                              <div className="tier-count">
+                                <span className="tier-label">Tier 3:</span>
+                                <span className="tier-value">{entry.tier3Contacts.toLocaleString()}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Expanded details */}
+                          {isExpanded && (
+                            <div className="firm-type-details" onClick={(e) => e.stopPropagation()}>
+                              <div className="detail-row">
+                                <span className="detail-label">% of Total Output:</span>
+                                <span className="detail-value">{percentOfTotal}%</span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">Tier 1 Distribution:</span>
+                                <span className="detail-value">
+                                  {entry.totalContacts > 0 ? ((entry.tier1Contacts / entry.totalContacts) * 100).toFixed(1) : 0}%
+                                </span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">Tier 2 Distribution:</span>
+                                <span className="detail-value">
+                                  {entry.totalContacts > 0 ? ((entry.tier2Contacts / entry.totalContacts) * 100).toFixed(1) : 0}%
+                                </span>
+                              </div>
+                              {entry.tier3Contacts > 0 && (
+                                <div className="detail-row">
+                                  <span className="detail-label">Tier 3 Distribution:</span>
+                                  <span className="detail-value">
+                                    {entry.totalContacts > 0 ? ((entry.tier3Contacts / entry.totalContacts) * 100).toFixed(1) : 0}%
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {fileEntry && (
+                            <button
+                              className="download-file-button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownloadIndividualFile(fileEntry.filename);
+                              }}
+                            >
+                              Download {entry.displayName}
+                            </button>
+                          )}
+
+                          <div className="expand-indicator">
+                            {isExpanded ? 'Click to collapse' : 'Click for details'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="firm-type-empty">
+                  <p className="section-description">
+                    Separate by Firm Type was enabled, but no contacts passed the filters.
+                    The output ZIP file contains empty sheets for each firm type group.
+                  </p>
+                  <p className="section-description">
+                    Click "Download All (ZIP)" to download the file structure.
+                  </p>
+                </div>
+              )}
+            </section>
+          )}
 
           {analytics?.input_file_details && analytics.input_file_details.length > 0 && (
             <section className="details-section">

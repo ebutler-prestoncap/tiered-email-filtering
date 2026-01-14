@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getPresets, createPreset, updatePreset, deletePreset } from '../services/api';
 import type { SettingsPreset, ProcessingSettings } from '../types';
 import FieldFilters from '../components/FieldFilters';
+import RemovalListManager from '../components/RemovalListManager';
 import './SettingsPage.css';
 
 export default function SettingsPage() {
@@ -22,7 +23,10 @@ export default function SettingsPage() {
       const loadedPresets = await getPresets();
       setPresets(loadedPresets);
     } catch (error) {
-      console.error('Failed to load presets:', error);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Failed to load presets:', error);
+      }
     } finally {
       setLoading(false);
     }
@@ -54,7 +58,10 @@ export default function SettingsPage() {
       loadPresets();
     } catch (error) {
       alert('Failed to create preset');
-      console.error(error);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Create preset error:', error);
+      }
     }
   };
 
@@ -78,7 +85,10 @@ export default function SettingsPage() {
       alert('Preset updated successfully!');
     } catch (error) {
       alert('Failed to update preset');
-      console.error(error);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Update preset error:', error);
+      }
     }
   };
 
@@ -97,7 +107,10 @@ export default function SettingsPage() {
       loadPresets();
     } catch (error) {
       alert('Failed to delete preset (may be default preset)');
-      console.error(error);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Delete preset error:', error);
+      }
     }
   };
 
@@ -110,10 +123,19 @@ export default function SettingsPage() {
 
   return (
     <div className="settings-page">
-      <h1>Settings Presets</h1>
+      <h1>Settings</h1>
       <p className="page-description">
-        Manage configuration presets for processing contacts.
+        Manage removal lists and configuration presets for processing contacts.
       </p>
+
+      <section className="preset-section">
+        <h2>Removal Lists</h2>
+        <p className="section-description">
+          Upload CSV files containing accounts or contacts to remove from processing.
+          The most recent active list of each type will be applied by default to all jobs.
+        </p>
+        <RemovalListManager />
+      </section>
 
       {defaultPreset && (
         <section className="preset-section">

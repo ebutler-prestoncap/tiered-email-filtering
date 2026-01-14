@@ -1,0 +1,237 @@
+.removal-list-manager {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl);
+}
+
+.removal-list-manager.loading {
+  padding: var(--spacing-xl);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.removal-list-section {
+  background-color: var(--color-surface);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-lg);
+  border: 1px solid var(--color-border);
+}
+
+.removal-list-section h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: var(--spacing-md);
+  color: var(--color-text);
+}
+
+.removal-upload-area {
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  text-align: center;
+  background-color: var(--color-background);
+  transition: var(--transition);
+  cursor: pointer;
+  margin-bottom: var(--spacing-md);
+}
+
+.removal-upload-area:hover,
+.removal-upload-area.dragging {
+  border-color: var(--color-accent);
+  background-color: rgba(0, 113, 227, 0.05);
+}
+
+.removal-file-input {
+  display: none;
+}
+
+.removal-upload-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.upload-icon-small {
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--color-accent);
+}
+
+.uploading-text {
+  color: var(--color-accent);
+}
+
+.active-list-card {
+  background-color: rgba(0, 113, 227, 0.08);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.active-badge {
+  background-color: var(--color-accent);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+
+.list-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.list-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.list-meta {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.file-missing-warning {
+  background-color: var(--color-warning);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.no-active-list {
+  background-color: var(--color-background);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  text-align: center;
+  margin-bottom: var(--spacing-md);
+}
+
+.no-list-text {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.list-history {
+  margin-top: var(--spacing-md);
+}
+
+.list-history h4 {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.list-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: var(--color-background);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+
+.list-item.active {
+  border-color: var(--color-accent);
+  background-color: rgba(0, 113, 227, 0.03);
+}
+
+.list-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.list-item-name {
+  font-size: 13px;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-item-meta {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.list-item-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.toggle-active-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background-color: var(--color-background);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.toggle-active-btn:hover {
+  background-color: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+.toggle-active-btn.active {
+  background-color: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+.file-missing {
+  font-size: 11px;
+  color: var(--color-warning);
+}
+
+.delete-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+  border: none;
+}
+
+.delete-btn:hover {
+  background-color: var(--color-error);
+  color: white;
+}

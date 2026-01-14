@@ -37,7 +37,10 @@ export default function HistoryPage() {
       setJobs(jobs.filter(j => j.id !== jobId));
     } catch (error) {
       alert('Failed to delete job');
-      console.error(error);
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Delete error:', error);
+      }
     }
   };
 
