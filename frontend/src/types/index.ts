@@ -176,6 +176,22 @@ export interface Analytics {
     };
     total_removed: number;
   };
+  // Pipeline flow statistics for visualization
+  pipeline_flow?: {
+    input_raw: number;
+    after_dedup: number;
+    after_removals: number;
+    after_premier: number | null;
+    premier_extracted: number | null;
+    tier1_output: number;
+    tier2_output: number;
+    tier3_output: number;
+    total_output: number;
+  };
+  // Separate Premier file (when not using firm type separation)
+  premier_file?: string;
+  // Accounts summary count
+  accounts_summary_count?: number;
 }
 
 export interface ApiResponse<T> {

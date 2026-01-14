@@ -343,6 +343,15 @@ export default function AnalyticsPage() {
               <button className="save-preset-button" onClick={() => setShowPresetModal(true)}>
                 Save as Preset
               </button>
+              {/* Premier download button (when separate file exists) */}
+              {analytics?.premier_file && (
+                <button
+                  className="download-button premier-download"
+                  onClick={() => handleDownloadIndividualFile(analytics.premier_file!)}
+                >
+                  Download Premier
+                </button>
+              )}
               <button className="download-button" onClick={handleDownload}>
                 {(analytics?.is_separated_by_firm_type || job.settings?.separateByFirmType) ? 'Download All (ZIP)' : 'Download Excel'}
               </button>
@@ -401,6 +410,92 @@ export default function AnalyticsPage() {
 
       {summary && (
         <div className="analytics-content">
+          {/* Pipeline Flow Visualization */}
+          {analytics?.pipeline_flow && (
+            <section className="details-section pipeline-flow-section">
+              <h2>Processing Pipeline</h2>
+              <p className="section-description">
+                Visual representation of contacts flowing through each processing stage.
+              </p>
+              <div className="pipeline-flow">
+                {/* Input Stage */}
+                <div className="pipeline-stage">
+                  <div className="stage-box stage-input">
+                    <div className="stage-label">Input</div>
+                    <div className="stage-value">{analytics.pipeline_flow.input_raw.toLocaleString()}</div>
+                  </div>
+                  <div className="stage-arrow">→</div>
+                </div>
+
+                {/* Deduplication Stage */}
+                <div className="pipeline-stage">
+                  <div className="stage-box stage-dedup">
+                    <div className="stage-label">Deduplication</div>
+                    <div className="stage-value">{analytics.pipeline_flow.after_dedup.toLocaleString()}</div>
+                    <div className="stage-delta negative">
+                      -{(analytics.pipeline_flow.input_raw - analytics.pipeline_flow.after_dedup).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="stage-arrow">→</div>
+                </div>
+
+                {/* Removals Stage */}
+                <div className="pipeline-stage">
+                  <div className="stage-box stage-removals">
+                    <div className="stage-label">Removal Lists</div>
+                    <div className="stage-value">{analytics.pipeline_flow.after_removals.toLocaleString()}</div>
+                    {analytics.pipeline_flow.after_dedup - analytics.pipeline_flow.after_removals > 0 && (
+                      <div className="stage-delta negative">
+                        -{(analytics.pipeline_flow.after_dedup - analytics.pipeline_flow.after_removals).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                  <div className="stage-arrow">→</div>
+                </div>
+
+                {/* Premier Stage (conditional) */}
+                {analytics.pipeline_flow.premier_extracted !== null && analytics.pipeline_flow.premier_extracted > 0 && (
+                  <div className="pipeline-stage">
+                    <div className="stage-box stage-premier">
+                      <div className="stage-label">Top 25 List</div>
+                      <div className="stage-value">{analytics.pipeline_flow.after_premier?.toLocaleString() ?? '-'}</div>
+                      <div className="stage-delta premier">
+                        Premier: {analytics.pipeline_flow.premier_extracted.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="stage-arrow">→</div>
+                  </div>
+                )}
+
+                {/* Tier Filtering Stage */}
+                <div className="pipeline-stage">
+                  <div className="stage-box stage-tiers">
+                    <div className="stage-label">Tiered Filtering</div>
+                    <div className="stage-value">
+                      {(analytics.pipeline_flow.tier1_output + analytics.pipeline_flow.tier2_output + analytics.pipeline_flow.tier3_output).toLocaleString()}
+                    </div>
+                    <div className="stage-tiers-breakdown">
+                      <span>T1: {analytics.pipeline_flow.tier1_output.toLocaleString()}</span>
+                      <span>T2: {analytics.pipeline_flow.tier2_output.toLocaleString()}</span>
+                      {analytics.pipeline_flow.tier3_output > 0 && (
+                        <span>T3: {analytics.pipeline_flow.tier3_output.toLocaleString()}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="stage-arrow">→</div>
+                </div>
+
+                {/* Output Stage */}
+                <div className="pipeline-stage">
+                  <div className="stage-box stage-output">
+                    <div className="stage-label">Output</div>
+                    <div className="stage-value">{analytics.pipeline_flow.total_output.toLocaleString()}</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
           <section className="summary-section">
             <h2>Processing Summary</h2>
             <div className="summary-grid">
