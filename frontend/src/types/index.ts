@@ -31,6 +31,9 @@ export interface ProcessingSettings {
   contactInclusionList?: string;  // Inline list of contacts to include (format: Name|Firm, newline-separated)
   fieldFilters?: FieldFilter[];  // Field-based filters (country, city, asset class, firm type, etc.)
   separateByFirmType?: boolean;  // Split output into separate files by firm type groups
+  applyAccountRemovalList?: boolean;  // Whether to apply the active account removal list
+  applyContactRemovalList?: boolean;  // Whether to apply the active contact removal list
+  enableAumMerge?: boolean;  // Whether to merge AUM data from accounts sheets
 }
 
 export interface SettingsPreset {
@@ -92,6 +95,24 @@ export interface InputFileDetail {
   firms: string[];
 }
 
+export interface FirmTypeBreakdownEntry {
+  firmTypeGroup: string;
+  displayName: string;
+  tier1Contacts: number;
+  tier2Contacts: number;
+  tier3Contacts: number;
+  totalContacts: number;
+}
+
+export interface FileInZipEntry {
+  filename: string;
+  firmTypeGroup: string;
+  tier1Contacts: number;
+  tier2Contacts: number;
+  tier3Contacts: number;
+  totalContacts: number;
+}
+
 export interface Analytics {
   processing_summary: ProcessingSummary;
   input_file_details: InputFileDetail[];
@@ -109,11 +130,43 @@ export interface Analytics {
   excluded_firms_list: string[];
   included_firms_list: string[];
   excluded_firm_contacts_count: number;
+  // Firm type separation fields
+  is_separated_by_firm_type?: boolean;
+  firm_type_breakdown?: FirmTypeBreakdownEntry[];
+  files_in_zip?: FileInZipEntry[];
+  // AUM merge fields
+  aum_merge?: {
+    enabled: boolean;
+    contacts_with_aum?: number;
+    contacts_without_aum?: number;
+    aum_min?: number | null;
+    aum_max?: number | null;
+    aum_avg?: number | null;
+    merge_method?: string | null;
+  };
 }
 
 export interface ApiResponse<T> {
   success: boolean;
   error?: string;
   data?: T;
+}
+
+export interface RemovalList {
+  id: string;
+  listType: 'account' | 'contact';
+  originalName: string;
+  storedPath?: string;
+  fileSize: number;
+  entryCount: number;
+  isActive: boolean;
+  uploadedAt: string;
+  lastUsedAt: string | null;
+  fileExists?: boolean;
+}
+
+export interface ActiveRemovalLists {
+  accountRemovalList: RemovalList | null;
+  contactRemovalList: RemovalList | null;
 }
 

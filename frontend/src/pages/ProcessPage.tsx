@@ -1,17 +1,25 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FileUpload from '../components/FileUpload';
 import ConfigurationPanel from '../components/ConfigurationPanel';
 import ProcessingSidePanel from '../components/ProcessingSidePanel';
 import PreviousFilesSelector from '../components/PreviousFilesSelector';
-import { uploadFiles, processContacts, listUploadedFiles } from '../services/api';
+import { uploadFiles, processContacts, listUploadedFiles, cancelJob, type FileValidationResult } from '../services/api';
 import { generatePrefixFromFilenames } from '../utils/filenameUtils';
 import type { ProcessingSettings } from '../types';
 import './ProcessPage.css';
 
+// Store file validations in a map keyed by file name + size
+type FileValidationMap = Map<string, FileValidationResult>;
+
+const getFileKey = (file: File | { name: string; size: number }): string => {
+  return `${file.name}-${file.size}`;
+};
+
 export default function ProcessPage() {
   const navigate = useNavigate();
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [fileValidations, setFileValidations] = useState<FileValidationMap>(new Map());
   const [selectedPreviousFileIds, setSelectedPreviousFileIds] = useState<string[]>([]);
   const [showProcessingPanel, setShowProcessingPanel] = useState(false);
   // Initialize with default values - ConfigurationPanel will update with preset
@@ -46,8 +54,9 @@ export default function ProcessPage() {
     fieldFilters: [],
   });
   const [isProcessing, setIsProcessing] = useState(false);
-  const [processingStatus, setProcessingStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | null>(null);
+  const [processingStatus, setProcessingStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /**
    * Update the output prefix based on selected files
@@ -96,21 +105,49 @@ export default function ProcessPage() {
     }
   }, []);
 
-  const handleFilesSelected = (files: File[]) => {
+  const handleFilesSelected = (files: File[], validations?: FileValidationResult[]) => {
     setUploadedFiles(prev => {
       // Avoid duplicates by checking file name and size
-      const newFiles = files.filter(newFile => 
-        !prev.some(existingFile => 
+      const newFiles = files.filter(newFile =>
+        !prev.some(existingFile =>
           existingFile.name === newFile.name && existingFile.size === newFile.size
         )
       );
       return [...prev, ...newFiles];
     });
+
+    // Store validations if provided
+    if (validations && validations.length > 0) {
+      setFileValidations(prev => {
+        const newMap = new Map(prev);
+        files.forEach((file, index) => {
+          if (validations[index]) {
+            newMap.set(getFileKey(file), validations[index]);
+          }
+        });
+        return newMap;
+      });
+    }
   };
 
   const handleRemoveFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+    setUploadedFiles(prev => {
+      const fileToRemove = prev[index];
+      // Also remove validation
+      if (fileToRemove) {
+        setFileValidations(prevValidations => {
+          const newMap = new Map(prevValidations);
+          newMap.delete(getFileKey(fileToRemove));
+          return newMap;
+        });
+      }
+      return prev.filter((_, i) => i !== index);
+    });
   };
+
+  const getFileValidation = useCallback((file: File): FileValidationResult | undefined => {
+    return fileValidations.get(getFileKey(file));
+  }, [fileValidations]);
 
   // Auto-update prefix when files or previous file selection changes
   useEffect(() => {
@@ -154,35 +191,44 @@ export default function ProcessPage() {
       setProcessingStatus('processing');
 
       // Poll for job completion
-      const pollInterval = setInterval(async () => {
+      pollIntervalRef.current = setInterval(async () => {
         try {
           const { getJob } = await import('../services/api');
           const job = await getJob(processResult.jobId);
           
           if (job.status === 'completed') {
-            clearInterval(pollInterval);
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
             setProcessingStatus('completed');
             setIsProcessing(false);
             // Navigate to analytics after a short delay
             setTimeout(() => {
               navigate(`/analytics/${processResult.jobId}`);
             }, 2000);
-          } else if (job.status === 'failed') {
-            clearInterval(pollInterval);
-            setProcessingStatus('failed');
+          } else if (job.status === 'failed' || job.status === 'cancelled') {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setProcessingStatus(job.status);
             setIsProcessing(false);
           }
         } catch (error) {
-      // Error logged to console for debugging in development
-      if (import.meta.env.DEV) {
-        console.error('Error polling job status:', error);
-      }
+          // Error logged to console for debugging in development
+          if (import.meta.env.DEV) {
+            console.error('Error polling job status:', error);
+          }
         }
       }, 2000);
 
       // Clear interval after 5 minutes (timeout)
       setTimeout(() => {
-        clearInterval(pollInterval);
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
         if (processingStatus === 'processing') {
           setProcessingStatus('failed');
           setIsProcessing(false);
@@ -200,6 +246,30 @@ export default function ProcessPage() {
     }
   };
 
+  const handleCancel = async () => {
+    if (!currentJobId) return;
+    
+    try {
+      await cancelJob(currentJobId);
+      
+      // Stop polling
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      
+      // Update status
+      setProcessingStatus('cancelled');
+      setIsProcessing(false);
+    } catch (error) {
+      // Error logged to console for debugging in development
+      if (import.meta.env.DEV) {
+        console.error('Error cancelling job:', error);
+      }
+      alert('Failed to cancel job. Please try again.');
+    }
+  };
+
   return (
     <div className={`process-page ${showProcessingPanel ? 'with-processing-bar' : ''}`}>
       {showProcessingPanel && (
@@ -207,6 +277,7 @@ export default function ProcessPage() {
           status={processingStatus}
           jobId={currentJobId}
           onClose={() => setShowProcessingPanel(false)}
+          onCancel={handleCancel}
         />
       )}
       
@@ -225,6 +296,7 @@ export default function ProcessPage() {
             onFilesSelected={handleFilesSelected}
             uploadedFiles={uploadedFiles}
             onRemoveFile={handleRemoveFile}
+            getFileValidation={getFileValidation}
           />
         </div>
 

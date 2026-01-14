@@ -57,10 +57,6 @@ export default function FieldFilters({ filters, onFiltersChange }: FieldFiltersP
     onFiltersChange(updated);
   };
 
-  const getFieldLabel = (fieldValue: string): string => {
-    return AVAILABLE_FIELDS.find(f => f.value === fieldValue)?.label || fieldValue;
-  };
-
   const availableFieldsForSelect = (currentField: string) => {
     const usedFields = new Set(filters.map(f => f.field));
     return AVAILABLE_FIELDS.filter(f => f.value === currentField || !usedFields.has(f.value));

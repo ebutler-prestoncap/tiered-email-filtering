@@ -3,8 +3,11 @@ Service layer wrapping TieredFilter for web app use.
 """
 import sys
 import threading
+import csv
+import re
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Set
+from difflib import SequenceMatcher
 import logging
 import pandas as pd
 import zipfile
@@ -15,6 +18,114 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from tiered_filter import TieredFilter
+from api.excel_validator import (
+    validate_excel_file,
+    find_column_match,
+    ACCOUNTS_COLUMNS,
+    CONTACTS_COLUMNS,
+)
+
+
+def normalize_name(name: str) -> str:
+    """Normalize a name for fuzzy matching - lowercase, remove punctuation, extra spaces"""
+    if not name:
+        return ''
+    # Lowercase and strip
+    name = name.lower().strip()
+    # Remove common suffixes/prefixes that vary
+    name = re.sub(r'\b(inc|llc|lp|ltd|corp|corporation|company|co|llp|plc|group|partners|management|capital|advisors|advisory|fund|funds)\b\.?', '', name)
+    # Remove punctuation except spaces
+    name = re.sub(r'[^\w\s]', '', name)
+    # Collapse multiple spaces
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name
+
+
+def fuzzy_match_score(str1: str, str2: str) -> float:
+    """Calculate fuzzy match score between two strings (0.0 to 1.0)"""
+    if not str1 or not str2:
+        return 0.0
+    return SequenceMatcher(None, str1, str2).ratio()
+
+
+def is_fuzzy_account_match(account_name: str, removal_accounts: Set[str], threshold: float = 0.85) -> Tuple[bool, str]:
+    """
+    Check if an account name fuzzy matches any account in the removal set.
+    Returns (is_match, matched_account_name).
+    Uses both exact normalized matching and fuzzy matching.
+    """
+    if not account_name:
+        return False, ''
+
+    normalized = normalize_name(account_name)
+    if not normalized:
+        return False, ''
+
+    # First try exact match on normalized name
+    if normalized in removal_accounts:
+        return True, normalized
+
+    # Also check if the original lowercase matches
+    original_lower = account_name.strip().lower()
+    if original_lower in removal_accounts:
+        return True, original_lower
+
+    # Fuzzy match against all accounts in removal set
+    for removal_account in removal_accounts:
+        # Try fuzzy match on normalized versions
+        removal_normalized = normalize_name(removal_account)
+        if removal_normalized and fuzzy_match_score(normalized, removal_normalized) >= threshold:
+            return True, removal_account
+
+        # Also try substring containment for longer names
+        if len(normalized) >= 5 and len(removal_normalized) >= 5:
+            if normalized in removal_normalized or removal_normalized in normalized:
+                return True, removal_account
+
+    return False, ''
+
+
+def is_fuzzy_contact_match(
+    name: str, email: str, account: str,
+    contact_removal_set: Set[Tuple[str, str]],
+    threshold: float = 0.85
+) -> Tuple[bool, str]:
+    """
+    Check if a contact fuzzy matches any contact in the removal set.
+    Matches by email (exact) or by name+account (fuzzy).
+    Returns (is_match, match_reason).
+    """
+    # Check email matches first (exact match on email)
+    if email:
+        email_lower = email.strip().lower()
+        for removal_name, removal_email_or_account in contact_removal_set:
+            if not removal_name and removal_email_or_account == email_lower:
+                return True, f'Email match: {email_lower}'
+
+    # Check name + account fuzzy match
+    if name and account:
+        name_normalized = normalize_name(name)
+        account_normalized = normalize_name(account)
+
+        for removal_name, removal_account in contact_removal_set:
+            if removal_name:  # This is a name+account entry, not email
+                removal_name_normalized = normalize_name(removal_name)
+                removal_account_normalized = normalize_name(removal_account)
+
+                # Check if both name and account match (fuzzy)
+                name_score = fuzzy_match_score(name_normalized, removal_name_normalized)
+                account_score = fuzzy_match_score(account_normalized, removal_account_normalized)
+
+                # Both must meet threshold, or one must be exact and other close
+                if name_score >= threshold and account_score >= threshold:
+                    return True, f'Name+Account match: {removal_name} @ {removal_account}'
+
+                # If name is very close and account contains/is contained
+                if name_score >= 0.9:
+                    if account_normalized in removal_account_normalized or removal_account_normalized in account_normalized:
+                        return True, f'Name match with account substring: {removal_name} @ {removal_account}'
+
+    return False, ''
 from api.tier_config_utils import (
     create_tier_config_from_keywords,
     get_default_tier1_keywords,
@@ -69,6 +180,186 @@ class FilterService:
             input_folder=str(self.input_folder),
             output_folder=str(self.output_folder)
         )
+        # Removal lists loaded from CSV files
+        self.account_removal_set: Set[str] = set()
+        self.contact_removal_set: Set[Tuple[str, str]] = set()  # (name, email) tuples
+        # Track removed contacts for analytics
+        self.removal_list_removed: List[Dict] = []  # Track contacts removed by removal lists
+
+    def load_account_removal_list(self, csv_path: str) -> int:
+        """Load account removal list from CSV file.
+        Returns the number of accounts loaded."""
+        self.account_removal_set = set()
+        try:
+            with open(csv_path, 'r', encoding='utf-8-sig') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # Look for Account Name column (case insensitive)
+                    account_name = None
+                    for key in row.keys():
+                        if key.lower().strip() in ['account name', 'account', 'investor', 'firm']:
+                            account_name = row[key]
+                            break
+                    if account_name and account_name.strip():
+                        self.account_removal_set.add(account_name.strip().lower())
+            logger.info(f"Loaded {len(self.account_removal_set)} accounts from removal list")
+            return len(self.account_removal_set)
+        except Exception as e:
+            logger.error(f"Failed to load account removal list: {e}")
+            return 0
+
+    def load_contact_removal_list(self, csv_path: str) -> int:
+        """Load contact removal list from CSV file.
+        Returns the number of contacts loaded."""
+        self.contact_removal_set = set()
+        try:
+            with open(csv_path, 'r', encoding='utf-8-sig') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    # Look for relevant columns
+                    contact_name = None
+                    email = None
+                    account_name = None
+                    for key in row.keys():
+                        key_lower = key.lower().strip()
+                        if key_lower in ['contact name', 'name', 'full name']:
+                            contact_name = row[key]
+                        elif key_lower in ['email', 'email address', 'e-mail']:
+                            email = row[key]
+                        elif key_lower in ['account name', 'account', 'investor', 'firm']:
+                            account_name = row[key]
+
+                    # Add to removal set - prefer email, fall back to name+account
+                    if email and email.strip():
+                        self.contact_removal_set.add(('', email.strip().lower()))
+                    elif contact_name and contact_name.strip() and account_name and account_name.strip():
+                        self.contact_removal_set.add((
+                            contact_name.strip().lower(),
+                            account_name.strip().lower()
+                        ))
+            logger.info(f"Loaded {len(self.contact_removal_set)} contacts from removal list")
+            return len(self.contact_removal_set)
+        except Exception as e:
+            logger.error(f"Failed to load contact removal list: {e}")
+            return 0
+
+    def apply_account_removal(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
+        """Remove rows where the INVESTOR/account column matches the removal list (with fuzzy matching).
+        Returns (filtered_df, list of removed contact records)."""
+        if not self.account_removal_set:
+            return df, []
+
+        initial_count = len(df)
+        removed_records = []
+
+        # Find the investor/account column
+        investor_col = None
+        for col in df.columns:
+            if col.upper() in ['INVESTOR', 'ACCOUNT', 'FIRM', 'ACCOUNT NAME']:
+                investor_col = col
+                break
+
+        if investor_col is None:
+            logger.warning("No INVESTOR/ACCOUNT column found, skipping account removal")
+            return df, []
+
+        # Find name column for tracking
+        name_col = None
+        for col in df.columns:
+            if col.upper() in ['NAME', 'FULL NAME', 'CONTACT NAME']:
+                name_col = col
+                break
+
+        # Check each row with fuzzy matching
+        keep_indices = []
+        for idx, row in df.iterrows():
+            investor_val = row.get(investor_col)
+            if pd.isna(investor_val) or not investor_val:
+                keep_indices.append(idx)
+                continue
+
+            is_match, matched_account = is_fuzzy_account_match(
+                str(investor_val),
+                self.account_removal_set,
+                threshold=0.85
+            )
+
+            if is_match:
+                # Track the removed contact
+                removed_records.append({
+                    'name': str(row.get(name_col, '')) if name_col else '',
+                    'investor': str(investor_val),
+                    'reason': f'Account Removal List: matched "{matched_account}"',
+                    'row_data': row.to_dict()
+                })
+            else:
+                keep_indices.append(idx)
+
+        filtered_df = df.loc[keep_indices].copy()
+        removed_count = initial_count - len(filtered_df)
+        logger.info(f"Account removal (fuzzy): removed {removed_count} contacts from {len(self.account_removal_set)} excluded accounts")
+
+        return filtered_df, removed_records
+
+    def apply_contact_removal(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
+        """Remove rows where the contact matches the removal list (by email or name+account with fuzzy matching).
+        Returns (filtered_df, list of removed contact records)."""
+        if not self.contact_removal_set:
+            return df, []
+
+        initial_count = len(df)
+        removed_records = []
+
+        # Find relevant columns
+        email_col = None
+        name_col = None
+        investor_col = None
+
+        for col in df.columns:
+            col_upper = col.upper()
+            if col_upper in ['EMAIL', 'E-MAIL', 'EMAIL ADDRESS']:
+                email_col = col
+            elif col_upper in ['NAME', 'FULL NAME', 'CONTACT NAME']:
+                name_col = col
+            elif col_upper in ['INVESTOR', 'ACCOUNT', 'FIRM', 'ACCOUNT NAME']:
+                investor_col = col
+
+        if email_col is None and (name_col is None or investor_col is None):
+            logger.warning("Missing required columns for contact removal, skipping")
+            return df, []
+
+        # Check each row with fuzzy matching
+        keep_indices = []
+        for idx, row in df.iterrows():
+            email_val = str(row.get(email_col, '')) if email_col and row.get(email_col) else ''
+            name_val = str(row.get(name_col, '')) if name_col and row.get(name_col) else ''
+            investor_val = str(row.get(investor_col, '')) if investor_col and row.get(investor_col) else ''
+
+            is_match, match_reason = is_fuzzy_contact_match(
+                name_val,
+                email_val,
+                investor_val,
+                self.contact_removal_set,
+                threshold=0.85
+            )
+
+            if is_match:
+                # Track the removed contact
+                removed_records.append({
+                    'name': name_val,
+                    'email': email_val,
+                    'investor': investor_val,
+                    'reason': f'Contact Removal List: {match_reason}',
+                    'row_data': row.to_dict()
+                })
+            else:
+                keep_indices.append(idx)
+
+        filtered_df = df.loc[keep_indices].copy()
+        removed_count = initial_count - len(filtered_df)
+        logger.info(f"Contact removal (fuzzy): removed {removed_count} contacts")
+
+        return filtered_df, removed_records
 
     def _classify_firm_type(self, firm_type_value: str) -> str:
         """Classify a firm type value into one of the 6 groups"""
@@ -124,7 +415,182 @@ class FilterService:
             logger.info(f"Firm type group '{group_name}': {len(group_df)} contacts")
 
         return groups
-    
+
+    def load_accounts_from_excel(self, file_path: str) -> Tuple[Optional[pd.DataFrame], Dict[str, Any]]:
+        """
+        Load accounts data from an Excel file that may contain multiple sheets.
+        Returns (accounts_df, info_dict) where info_dict contains column mappings.
+        """
+        info = {
+            'accounts_sheet': None,
+            'firm_id_column': None,
+            'firm_name_column': None,
+            'aum_column': None,
+            'row_count': 0,
+            'loaded': False,
+        }
+
+        try:
+            validation = validate_excel_file(file_path)
+
+            if not validation.get('accounts_sheet'):
+                logger.debug(f"No accounts sheet found in {file_path}")
+                return None, info
+
+            accounts_sheet = validation['accounts_sheet']
+            xlsx = pd.ExcelFile(file_path)
+            accounts_df = pd.read_excel(xlsx, sheet_name=accounts_sheet)
+
+            if len(accounts_df) == 0:
+                logger.warning(f"Accounts sheet '{accounts_sheet}' is empty")
+                return None, info
+
+            # Find key columns
+            columns = list(accounts_df.columns)
+
+            firm_id_col = find_column_match(columns, 'FIRM ID', ACCOUNTS_COLUMNS['aliases'])
+            firm_name_col = find_column_match(columns, 'FIRM NAME', ACCOUNTS_COLUMNS['aliases'])
+            aum_col = find_column_match(columns, 'AUM (USD MN)', ACCOUNTS_COLUMNS['aliases'])
+
+            if not firm_id_col and not firm_name_col:
+                logger.warning("Accounts sheet missing both FIRM ID and FIRM NAME columns")
+                return None, info
+
+            info['accounts_sheet'] = accounts_sheet
+            info['firm_id_column'] = firm_id_col
+            info['firm_name_column'] = firm_name_col
+            info['aum_column'] = aum_col
+            info['row_count'] = len(accounts_df)
+            info['loaded'] = True
+
+            logger.info(f"Loaded accounts from '{accounts_sheet}': {len(accounts_df)} rows, AUM column: {aum_col}")
+            return accounts_df, info
+
+        except Exception as e:
+            logger.error(f"Error loading accounts from {file_path}: {e}")
+            return None, info
+
+    def merge_aum_into_contacts(
+        self,
+        contacts_df: pd.DataFrame,
+        accounts_df: pd.DataFrame,
+        accounts_info: Dict[str, Any]
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """
+        Merge AUM data from accounts into contacts based on FIRM_ID or firm name.
+        Returns (merged_df, merge_stats).
+        """
+        merge_stats = {
+            'contacts_total': len(contacts_df),
+            'contacts_with_aum': 0,
+            'contacts_without_aum': 0,
+            'aum_min': None,
+            'aum_max': None,
+            'aum_avg': None,
+            'merge_method': None,
+        }
+
+        if accounts_df is None or len(accounts_df) == 0:
+            merge_stats['contacts_without_aum'] = len(contacts_df)
+            return contacts_df, merge_stats
+
+        aum_col = accounts_info.get('aum_column')
+        if not aum_col:
+            logger.warning("No AUM column in accounts data, skipping AUM merge")
+            merge_stats['contacts_without_aum'] = len(contacts_df)
+            return contacts_df, merge_stats
+
+        # Try to merge by FIRM_ID first
+        firm_id_col = accounts_info.get('firm_id_column')
+        firm_name_col = accounts_info.get('firm_name_column')
+
+        # Find contacts FIRM_ID column
+        contacts_firm_id_col = None
+        for col in contacts_df.columns:
+            if col.upper().replace('_', ' ').strip() in ['FIRM ID', 'FIRMID', 'FIRM_ID']:
+                contacts_firm_id_col = col
+                break
+
+        merged_df = contacts_df.copy()
+
+        # Initialize AUM column
+        merged_df['AUM_USD_MN'] = None
+
+        if firm_id_col and contacts_firm_id_col:
+            # Merge by FIRM_ID
+            logger.info(f"Merging AUM by FIRM_ID: accounts.{firm_id_col} -> contacts.{contacts_firm_id_col}")
+            merge_stats['merge_method'] = 'FIRM_ID'
+
+            # Create lookup dict from accounts
+            aum_lookup = {}
+            for _, row in accounts_df.iterrows():
+                fid = row.get(firm_id_col)
+                aum = row.get(aum_col)
+                if pd.notna(fid) and pd.notna(aum):
+                    try:
+                        aum_lookup[str(fid).strip()] = float(aum)
+                    except (ValueError, TypeError):
+                        pass
+
+            # Apply lookup
+            def get_aum(firm_id):
+                if pd.isna(firm_id):
+                    return None
+                return aum_lookup.get(str(firm_id).strip())
+
+            merged_df['AUM_USD_MN'] = merged_df[contacts_firm_id_col].apply(get_aum)
+
+        elif firm_name_col:
+            # Fallback: merge by firm name (fuzzy)
+            logger.info(f"Merging AUM by firm name (fuzzy matching)")
+            merge_stats['merge_method'] = 'FIRM_NAME_FUZZY'
+
+            # Find contacts INVESTOR column
+            investor_col = None
+            for col in merged_df.columns:
+                if col.upper() in ['INVESTOR', 'FIRM', 'ACCOUNT', 'FIRM NAME', 'ACCOUNT NAME']:
+                    investor_col = col
+                    break
+
+            if investor_col:
+                # Create normalized lookup
+                aum_lookup = {}
+                for _, row in accounts_df.iterrows():
+                    fname = row.get(firm_name_col)
+                    aum = row.get(aum_col)
+                    if pd.notna(fname) and pd.notna(aum):
+                        normalized = normalize_name(str(fname))
+                        if normalized:
+                            try:
+                                aum_lookup[normalized] = float(aum)
+                            except (ValueError, TypeError):
+                                pass
+
+                def get_aum_by_name(investor):
+                    if pd.isna(investor):
+                        return None
+                    normalized = normalize_name(str(investor))
+                    return aum_lookup.get(normalized)
+
+                merged_df['AUM_USD_MN'] = merged_df[investor_col].apply(get_aum_by_name)
+
+        # Calculate stats
+        aum_values = merged_df['AUM_USD_MN'].dropna()
+        merge_stats['contacts_with_aum'] = len(aum_values)
+        merge_stats['contacts_without_aum'] = len(merged_df) - len(aum_values)
+
+        if len(aum_values) > 0:
+            merge_stats['aum_min'] = float(aum_values.min())
+            merge_stats['aum_max'] = float(aum_values.max())
+            merge_stats['aum_avg'] = float(aum_values.mean())
+
+        logger.info(
+            f"AUM merge complete: {merge_stats['contacts_with_aum']}/{merge_stats['contacts_total']} "
+            f"contacts have AUM data (method: {merge_stats['merge_method']})"
+        )
+
+        return merged_df, merge_stats
+
     def process_contacts(
         self,
         uploaded_files: list,
@@ -210,7 +676,34 @@ class FilterService:
             contact_exclusion_list = settings.get("contactExclusionList", "")
             if contact_exclusion_list and contact_exclusion_list.strip():
                 self._load_contact_exclusion_from_string(contact_exclusion_list)
-            
+
+            # Load removal lists from database if enabled
+            # Import here to avoid circular imports
+            from database import Database
+            from config import DATABASE_PATH
+            db = Database(str(DATABASE_PATH))
+
+            apply_account_removal = settings.get("applyAccountRemovalList", True)
+            apply_contact_removal = settings.get("applyContactRemovalList", True)
+
+            if apply_account_removal:
+                account_removal_list = db.get_active_removal_list('account')
+                if account_removal_list and account_removal_list.get('stored_path'):
+                    stored_path = Path(account_removal_list['stored_path'])
+                    if stored_path.exists():
+                        self.load_account_removal_list(str(stored_path))
+                        db.update_removal_list_last_used(account_removal_list['id'])
+                        logger.info(f"Job {job_id}: Loaded account removal list: {account_removal_list['original_name']}")
+
+            if apply_contact_removal:
+                contact_removal_list = db.get_active_removal_list('contact')
+                if contact_removal_list and contact_removal_list.get('stored_path'):
+                    stored_path = Path(contact_removal_list['stored_path'])
+                    if stored_path.exists():
+                        self.load_contact_removal_list(str(stored_path))
+                        db.update_removal_list_last_used(contact_removal_list['id'])
+                        logger.info(f"Job {job_id}: Loaded contact removal list: {contact_removal_list['original_name']}")
+
             # Check for cancellation after loading lists
             if cancel_event and cancel_event.is_set():
                 raise RuntimeError("Job cancelled")
@@ -403,11 +896,47 @@ class FilterService:
         logger.info(f"Job {job_id}: Standardizing columns")
         standardized_df = self.filter.standardize_columns(combined_df)
         logger.info(f"Job {job_id}: Standardized {len(standardized_df)} rows")
-        
+
         # Check for cancellation
         if cancel_event and cancel_event.is_set():
             raise RuntimeError("Job cancelled")
-        
+
+        # Load and merge AUM data from accounts sheets if available
+        aum_merge_stats = None
+        enable_aum_merge = settings.get("enableAumMerge", True)  # Default to True
+
+        if enable_aum_merge:
+            logger.info(f"Job {job_id}: Checking for accounts sheets to merge AUM data")
+            all_accounts_df = []
+            accounts_info = None
+
+            # Check each input file for accounts sheet
+            for file_path in self.filter.input_folder.glob("*.xlsx"):
+                accounts_df, info = self.load_accounts_from_excel(str(file_path))
+                if accounts_df is not None and info.get('loaded'):
+                    all_accounts_df.append(accounts_df)
+                    if accounts_info is None:
+                        accounts_info = info
+                    logger.info(f"Job {job_id}: Found accounts data in {file_path.name}")
+
+            # Combine all accounts data
+            if all_accounts_df:
+                combined_accounts = pd.concat(all_accounts_df, ignore_index=True)
+                # Remove duplicate accounts by FIRM_ID if available
+                if accounts_info and accounts_info.get('firm_id_column'):
+                    firm_id_col = accounts_info['firm_id_column']
+                    combined_accounts = combined_accounts.drop_duplicates(subset=[firm_id_col], keep='first')
+
+                logger.info(f"Job {job_id}: Merging AUM from {len(combined_accounts)} accounts into contacts")
+                standardized_df, aum_merge_stats = self.merge_aum_into_contacts(
+                    standardized_df, combined_accounts, accounts_info
+                )
+                logger.info(f"Job {job_id}: AUM merge complete - {aum_merge_stats.get('contacts_with_aum', 0)} contacts have AUM")
+
+        # Check for cancellation
+        if cancel_event and cancel_event.is_set():
+            raise RuntimeError("Job cancelled")
+
         # Remove duplicates
         logger.info(f"Job {job_id}: Removing duplicates")
         deduplicated_df = self.filter.remove_duplicates(standardized_df)
@@ -451,12 +980,29 @@ class FilterService:
                     name = str(row.get('NAME', '')).lower().strip()
                     firm = str(row.get('INVESTOR', '')).lower().strip()
                     return (name, firm) in self.filter.excluded_contacts_normalized
-                
+
                 mask = ~deduplicated_df.apply(is_contact_excluded, axis=1)
                 excluded_count = len(deduplicated_df) - len(deduplicated_df[mask])
                 deduplicated_df = deduplicated_df[mask].copy()
                 logger.info(f"Excluded {excluded_count} contacts from exclusion list")
-        
+
+        # Apply account removal list (from uploaded CSV) with fuzzy matching
+        account_removed_records = []
+        if self.account_removal_set:
+            logger.info(f"Job {job_id}: Applying account removal list to {len(deduplicated_df)} contacts")
+            deduplicated_df, account_removed_records = self.apply_account_removal(deduplicated_df)
+            logger.info(f"Job {job_id}: After account removal: {len(deduplicated_df)} contacts remain ({len(account_removed_records)} removed)")
+
+        # Apply contact removal list (from uploaded CSV) with fuzzy matching
+        contact_removed_records = []
+        if self.contact_removal_set:
+            logger.info(f"Job {job_id}: Applying contact removal list to {len(deduplicated_df)} contacts")
+            deduplicated_df, contact_removed_records = self.apply_contact_removal(deduplicated_df)
+            logger.info(f"Job {job_id}: After contact removal: {len(deduplicated_df)} contacts remain ({len(contact_removed_records)} removed)")
+
+        # Store removal list records for delta analysis
+        self.removal_list_removed = account_removed_records + contact_removed_records
+
         # Apply field filters (country, city, asset class, firm type, etc.)
         field_filters = settings.get("fieldFilters", [])
         if field_filters:
@@ -573,7 +1119,41 @@ class FilterService:
             combined_df, standardized_df, deduplicated_df,
             tier1_df, tier2_df, tier1_config, tier2_config
         )
-        
+
+        # Add removal list removals to delta analysis
+        if self.removal_list_removed:
+            logger.info(f"Job {job_id}: Adding {len(self.removal_list_removed)} removal list entries to delta analysis")
+            removal_rows = []
+            for record in self.removal_list_removed:
+                row_data = record.get('row_data', {})
+                # Create delta row entry
+                delta_row = {
+                    'STD_NAME': record.get('name', ''),
+                    'STD_INVESTOR': record.get('investor', ''),
+                    'STD_JOB_TITLE': row_data.get('JOB_TITLE', row_data.get('STD_JOB_TITLE', '')),
+                    'STD_EMAIL': record.get('email', row_data.get('EMAIL', '')),
+                    'PROCESSING_STATUS': 'Removed',
+                    'FILTER_REASON': record.get('reason', 'Removal List'),
+                    'FINAL_TIER': '',
+                    'TIER_MATCH': 'Removal List',
+                    'PRIORITY_SCORE': 0,
+                }
+                # Add any other columns from original row
+                for col in delta_df.columns:
+                    if col not in delta_row:
+                        delta_row[col] = row_data.get(col, '')
+                removal_rows.append(delta_row)
+
+            if removal_rows:
+                removal_df = pd.DataFrame(removal_rows)
+                # Ensure columns match
+                for col in delta_df.columns:
+                    if col not in removal_df.columns:
+                        removal_df[col] = ''
+                removal_df = removal_df[delta_df.columns]
+                delta_df = pd.concat([delta_df, removal_df], ignore_index=True)
+                logger.info(f"Job {job_id}: Delta analysis now has {len(delta_df)} entries")
+
         # Check for cancellation
         if cancel_event and cancel_event.is_set():
             raise RuntimeError("Job cancelled")
@@ -622,7 +1202,21 @@ class FilterService:
             deduplicated_df, delta_df, excluded_firms_analysis,
             rescue_stats, self.filter
         )
-        
+
+        # Add AUM merge stats to analytics
+        if aum_merge_stats:
+            analytics["aum_merge"] = {
+                "enabled": True,
+                "contacts_with_aum": aum_merge_stats.get('contacts_with_aum', 0),
+                "contacts_without_aum": aum_merge_stats.get('contacts_without_aum', 0),
+                "aum_min": aum_merge_stats.get('aum_min'),
+                "aum_max": aum_merge_stats.get('aum_max'),
+                "aum_avg": aum_merge_stats.get('aum_avg'),
+                "merge_method": aum_merge_stats.get('merge_method'),
+            }
+        else:
+            analytics["aum_merge"] = {"enabled": False}
+
         # Check for cancellation before creating output file
         if cancel_event and cancel_event.is_set():
             raise RuntimeError("Job cancelled")
@@ -638,6 +1232,10 @@ class FilterService:
             tier1_groups = self._separate_by_firm_type(tier1_df)
             tier2_groups = self._separate_by_firm_type(tier2_df)
             rescued_groups = self._separate_by_firm_type(rescued_df) if rescued_df is not None else None
+
+            # Build firm type breakdown for analytics
+            firm_type_breakdown = []
+            files_in_zip = []
 
             # Create a zip file containing all 6 Excel files
             zip_filename = output_filename.replace('.xlsx', '.zip')
@@ -665,8 +1263,8 @@ class FilterService:
                     excel_buffer = io.BytesIO()
 
                     with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                        # Define standard column order
-                        standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE']
+                        # Define standard column order (including AUM if available)
+                        standard_columns = ['NAME', 'INVESTOR', 'EMAIL', 'EMAIL_STATUS', 'EMAIL_SCHEMA', 'JOB_TITLE', 'AUM_USD_MN']
 
                         # Add First Name and Last Name if they exist
                         if len(group_tier1) > 0 and 'First Name' in group_tier1.columns:
@@ -706,6 +1304,32 @@ class FilterService:
                     excel_buffer.seek(0)
                     zipf.writestr(group_filename, excel_buffer.read())
                     logger.info(f"Job {job_id}: Added {group_filename} to zip (T1: {len(group_tier1)}, T2: {len(group_tier2)}, T3: {len(group_rescued) if group_rescued is not None else 0})")
+
+                    # Track file info for analytics
+                    tier3_count = len(group_rescued) if group_rescued is not None else 0
+                    files_in_zip.append({
+                        "filename": group_filename,
+                        "firmTypeGroup": group_name,
+                        "tier1Contacts": len(group_tier1),
+                        "tier2Contacts": len(group_tier2),
+                        "tier3Contacts": tier3_count,
+                        "totalContacts": total_contacts
+                    })
+
+                    # Build breakdown entry
+                    firm_type_breakdown.append({
+                        "firmTypeGroup": group_name,
+                        "displayName": group_name.replace('_', ' / ').replace('FamilyOffice', 'Family Office'),
+                        "tier1Contacts": len(group_tier1),
+                        "tier2Contacts": len(group_tier2),
+                        "tier3Contacts": tier3_count,
+                        "totalContacts": total_contacts
+                    })
+
+            # Add firm type breakdown to analytics
+            analytics["firm_type_breakdown"] = firm_type_breakdown
+            analytics["files_in_zip"] = files_in_zip
+            analytics["is_separated_by_firm_type"] = True
 
             logger.info(f"Job {job_id}: Created zip file with separated firm type files: {zip_path}")
             output_path = str(zip_path)
