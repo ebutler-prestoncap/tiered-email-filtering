@@ -6,7 +6,8 @@
   bottom: 0;
   background-color: rgba(0, 0, 0, 0.3);
   z-index: 998;
-  display: none;
+  cursor: pointer;
+  /* Only rendered by React when sidebar is open */
 }
 
 .sidebar {
@@ -140,10 +141,6 @@
 
 /* Mobile: Sidebar slides in from left */
 @media (max-width: 1023px) {
-  .sidebar-overlay {
-    display: block;
-  }
-
   .sidebar {
     box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
   }

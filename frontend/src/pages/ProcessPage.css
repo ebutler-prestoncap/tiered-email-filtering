@@ -1,4 +1,5 @@
 .process-page {
+  width: 100%;
   max-width: 100%;
   position: relative;
   padding-right: 0;
@@ -15,12 +16,14 @@
   font-weight: 600;
   margin-bottom: var(--spacing-sm);
   color: var(--color-text);
+  text-align: center;
 }
 
 .page-description {
   font-size: 16px;
   color: var(--color-text-secondary);
   margin-bottom: var(--spacing-xl);
+  text-align: center;
 }
 
 /* Vertical layout */
@@ -29,6 +32,15 @@
   flex-direction: column;
   gap: var(--spacing-xl);
   max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 0 var(--spacing-lg);
+}
+
+@media (max-width: 768px) {
+  .process-layout-vertical {
+    padding: 0 var(--spacing-md);
+  }
 }
 
 /* Upload section */

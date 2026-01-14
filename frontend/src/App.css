@@ -53,27 +53,31 @@
 }
 
 .menu-toggle {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-sm);
-  background-color: transparent;
+  background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   color: var(--color-text);
-  font-size: 20px;
+  font-size: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
-.menu-toggle:hover {
-  background-color: var(--color-surface);
-  border-color: var(--color-border);
+.menu-toggle:hover,
+.menu-toggle:active {
+  background-color: var(--color-border);
+  border-color: var(--color-text-secondary);
 }
 
 .menu-toggle-icon {
   line-height: 1;
+  pointer-events: none;
 }
 
 /* Hide menu toggle on desktop */
