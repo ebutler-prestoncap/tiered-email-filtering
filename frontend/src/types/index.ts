@@ -34,6 +34,8 @@ export interface ProcessingSettings {
   applyAccountRemovalList?: boolean;  // Whether to apply the active account removal list
   applyContactRemovalList?: boolean;  // Whether to apply the active contact removal list
   enableAumMerge?: boolean;  // Whether to merge AUM data from accounts sheets
+  extractPremierContacts?: boolean;  // Whether to extract top firms by AUM into Premier list
+  premierLimit?: number;  // Number of top firms per bucket for Premier list (default 25)
 }
 
 export interface SettingsPreset {
@@ -52,6 +54,8 @@ export interface Job {
   input_files: string[];
   output_filename?: string;
   analytics?: Analytics;
+  progress_text?: string;
+  progress_percent?: number;
 }
 
 export interface ProcessingSummary {
@@ -143,6 +147,15 @@ export interface Analytics {
     aum_max?: number | null;
     aum_avg?: number | null;
     merge_method?: string | null;
+  };
+  // Premier contacts extraction fields
+  premier_extraction?: {
+    enabled: boolean;
+    premier_limit?: number;
+    premier_firms_count?: number;
+    premier_contacts_count?: number;
+    by_firm_type?: boolean;
+    breakdown_by_type?: Record<string, { firms: number; contacts: number }>;
   };
 }
 

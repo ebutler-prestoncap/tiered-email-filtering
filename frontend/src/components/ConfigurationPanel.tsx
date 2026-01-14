@@ -27,21 +27,62 @@ export default function ConfigurationPanel({
   const [isLoadingPresets, setIsLoadingPresets] = useState(true);
   const [activeLists, setActiveLists] = useState<ActiveRemovalLists>({ accountRemovalList: null, contactRemovalList: null });
 
+  // Default tier filter configurations - used when loading presets that don't have them
+  const defaultTierFilters = {
+    tier1Filters: {
+      includeKeywords: ['cio', 'chief investment officer', 'portfolio manager', 'director'],
+      excludeKeywords: ['operations', 'hr', 'marketing'],
+      requireInvestmentTeam: false,
+    },
+    tier2Filters: {
+      includeKeywords: ['analyst', 'associate', 'director'],
+      excludeKeywords: ['operations', 'hr', 'marketing'],
+      requireInvestmentTeam: true,
+    },
+    tier3Filters: {
+      includeKeywords: ['ceo', 'cfo', 'director'],
+      excludeKeywords: [],
+      requireInvestmentTeam: false,
+    },
+  };
+
+  // Ensure settings have tier filters with defaults if missing
+  const ensureTierFilters = (presetSettings: ProcessingSettings): ProcessingSettings => {
+    return {
+      ...presetSettings,
+      tier1Filters: presetSettings.tier1Filters || defaultTierFilters.tier1Filters,
+      tier2Filters: presetSettings.tier2Filters || defaultTierFilters.tier2Filters,
+      tier3Filters: presetSettings.tier3Filters || defaultTierFilters.tier3Filters,
+    };
+  };
+
   useEffect(() => {
-    loadPresets();
-    loadActiveRemovalLists();
+    // Load presets first, then removal lists
+    // This ensures preset settings are applied before removal list toggles
+    loadPresets().then((loadedSettings) => {
+      loadActiveRemovalLists(loadedSettings || undefined);
+    });
   }, []);
 
-  const loadActiveRemovalLists = async () => {
+  const loadActiveRemovalLists = async (currentSettings?: ProcessingSettings) => {
     try {
       const lists = await getActiveRemovalLists();
       setActiveLists(lists);
       // Set default toggle values based on whether lists exist
-      if (lists.accountRemovalList && settings.applyAccountRemovalList === undefined) {
-        onSettingsChange({ ...settings, applyAccountRemovalList: true });
+      // Use currentSettings if provided (from loadPresets chain), otherwise fall back to props
+      const settingsToUse = currentSettings || settings;
+      const updates: Partial<ProcessingSettings> = {};
+
+      if (lists.accountRemovalList && settingsToUse.applyAccountRemovalList === undefined) {
+        updates.applyAccountRemovalList = true;
       }
-      if (lists.contactRemovalList && settings.applyContactRemovalList === undefined) {
-        onSettingsChange({ ...settings, applyContactRemovalList: true });
+      if (lists.contactRemovalList && settingsToUse.applyContactRemovalList === undefined) {
+        updates.applyContactRemovalList = true;
+      }
+
+      // Only call onSettingsChange if there are updates to make
+      if (Object.keys(updates).length > 0) {
+        onSettingsChange({ ...settingsToUse, ...updates });
       }
     } catch (error) {
       if (import.meta.env.DEV) {
@@ -50,7 +91,7 @@ export default function ConfigurationPanel({
     }
   };
 
-  const loadPresets = async () => {
+  const loadPresets = async (): Promise<ProcessingSettings | null> => {
     setIsLoadingPresets(true);
     try {
       const loadedPresets = await getPresets();
@@ -58,8 +99,10 @@ export default function ConfigurationPanel({
       const defaultPreset = loadedPresets.find(p => p.is_default);
       if (defaultPreset) {
         setSelectedPresetId(defaultPreset.id);
-        // Always set default preset on load
-        onSettingsChange(defaultPreset.settings);
+        // Always set default preset on load, ensuring tier filters exist
+        const presetSettings = ensureTierFilters(defaultPreset.settings);
+        onSettingsChange(presetSettings);
+        return presetSettings;
       } else {
         // Fallback to hardcoded defaults if no preset found
         const fallbackSettings: ProcessingSettings = {
@@ -94,6 +137,7 @@ export default function ConfigurationPanel({
           separateByFirmType: false,
         };
         onSettingsChange(fallbackSettings);
+        return fallbackSettings;
       }
     } catch (error) {
       // Error logged to console for debugging in development
@@ -125,14 +169,15 @@ export default function ConfigurationPanel({
           excludeKeywords: [],
           requireInvestmentTeam: false,
         },
-          firmExclusionList: '',
-          firmInclusionList: '',
-          contactExclusionList: '',
-          contactInclusionList: '',
-          fieldFilters: [],
-          separateByFirmType: false,
-        };
-        onSettingsChange(fallbackSettings);
+        firmExclusionList: '',
+        firmInclusionList: '',
+        contactExclusionList: '',
+        contactInclusionList: '',
+        fieldFilters: [],
+        separateByFirmType: false,
+      };
+      onSettingsChange(fallbackSettings);
+      return fallbackSettings;
     } finally {
       setIsLoadingPresets(false);
     }
@@ -142,7 +187,8 @@ export default function ConfigurationPanel({
     const preset = presets.find(p => p.id === presetId);
     if (preset) {
       setSelectedPresetId(presetId);
-      onSettingsChange(preset.settings);
+      // Ensure tier filters exist when loading preset
+      onSettingsChange(ensureTierFilters(preset.settings));
     }
   };
 
@@ -295,6 +341,59 @@ export default function ConfigurationPanel({
           </label>
           <p className="config-hint">Generate 6 separate output files by firm type: Insurance, Wealth/Family Office, Endowments/Foundations, Pension Funds, Funds of Funds, Other</p>
         </div>
+
+        <div className="config-section">
+          <label className="config-toggle">
+            <input
+              type="checkbox"
+              checked={settings.enableAumMerge !== false}
+              onChange={(e) => updateSetting('enableAumMerge', e.target.checked)}
+            />
+            <span>Merge AUM Data</span>
+          </label>
+          <p className="config-hint">Merge Assets Under Management data from Accounts sheets into contacts</p>
+        </div>
+      </div>
+
+      {/* Premier Contacts Extraction */}
+      <div className="config-group">
+        <h3 className="config-group-title">Premier Contacts</h3>
+        <p className="config-hint" style={{ marginBottom: 'var(--spacing-md)' }}>
+          Extract top firms by AUM into a separate Premier Contacts list. Requires AUM data.
+        </p>
+
+        <div className="config-section">
+          <label className="config-toggle">
+            <input
+              type="checkbox"
+              checked={settings.extractPremierContacts || false}
+              onChange={(e) => updateSetting('extractPremierContacts', e.target.checked)}
+              disabled={settings.enableAumMerge === false}
+            />
+            <span>Extract Premier Contacts</span>
+          </label>
+          <p className="config-hint">
+            {settings.separateByFirmType
+              ? `Top ${settings.premierLimit || 25} firms per firm type bucket (up to ${(settings.premierLimit || 25) * 6} firms total)`
+              : `Top ${settings.premierLimit || 25} firms overall by AUM`
+            }. Premier firms are removed from tiered output.
+          </p>
+        </div>
+
+        {settings.extractPremierContacts && (
+          <div className="config-section">
+            <label className="config-label">Premier Limit (firms per bucket)</label>
+            <input
+              type="number"
+              className="config-input"
+              min="1"
+              max="100"
+              value={settings.premierLimit || 25}
+              onChange={(e) => updateSetting('premierLimit', parseInt(e.target.value) || 25)}
+            />
+            <p className="config-hint">Number of top firms by AUM to extract (default: 25)</p>
+          </div>
+        )}
       </div>
 
       {/* Removal Lists */}

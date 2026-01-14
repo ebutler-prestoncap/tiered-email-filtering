@@ -66,6 +66,8 @@ export default function ProcessPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [progressText, setProgressText] = useState<string | undefined>(undefined);
+  const [progressPercent, setProgressPercent] = useState<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /**
@@ -210,6 +212,8 @@ export default function ProcessPage() {
     setIsProcessing(true);
     setProcessingStatus('pending');
     setShowProcessingPanel(true);
+    setProgressText(undefined);
+    setProgressPercent(0);
 
     try {
       let filePaths: string[] = [];
@@ -240,7 +244,15 @@ export default function ProcessPage() {
         try {
           const { getJob } = await import('../services/api');
           const job = await getJob(processResult.jobId);
-          
+
+          // Update progress info
+          if (job.progress_text) {
+            setProgressText(job.progress_text);
+          }
+          if (job.progress_percent !== undefined) {
+            setProgressPercent(job.progress_percent);
+          }
+
           if (job.status === 'completed') {
             if (pollIntervalRef.current) {
               clearInterval(pollIntervalRef.current);
@@ -323,6 +335,8 @@ export default function ProcessPage() {
           jobId={currentJobId}
           onClose={() => setShowProcessingPanel(false)}
           onCancel={handleCancel}
+          progressText={progressText}
+          progressPercent={progressPercent}
         />
       )}
 

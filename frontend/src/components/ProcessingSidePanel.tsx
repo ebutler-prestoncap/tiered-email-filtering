@@ -6,9 +6,11 @@ interface ProcessingSidePanelProps {
   jobId: string | null;
   onClose?: () => void;
   onCancel?: () => void;
+  progressText?: string;
+  progressPercent?: number;
 }
 
-export default function ProcessingSidePanel({ status, jobId, onClose, onCancel }: ProcessingSidePanelProps) {
+export default function ProcessingSidePanel({ status, jobId, onClose, onCancel, progressText, progressPercent }: ProcessingSidePanelProps) {
   useEffect(() => {
     // Auto-close after 5 seconds if completed
     if (status === 'completed' && onClose) {
@@ -21,15 +23,22 @@ export default function ProcessingSidePanel({ status, jobId, onClose, onCancel }
 
   if (!status || !jobId) return null;
 
-  const statusMessages = {
-    pending: 'Job queued for processing...',
-    processing: 'Processing contacts...',
-    completed: 'Processing completed!',
-    failed: 'Processing failed',
-    cancelled: 'Processing cancelled',
+  // Use progress text from backend if available, otherwise fall back to defaults
+  const getStatusMessage = (): string => {
+    if (status === 'processing' && progressText) {
+      return progressText;
+    }
+    const defaultMessages: Record<string, string> = {
+      pending: 'Job queued for processing...',
+      processing: 'Processing contacts...',
+      completed: 'Processing completed!',
+      failed: 'Processing failed',
+      cancelled: 'Processing cancelled',
+    };
+    return defaultMessages[status] || 'Unknown status';
   };
 
-  const statusIcons = {
+  const statusIcons: Record<string, string> = {
     pending: '⏳',
     processing: '⚙️',
     completed: '✅',
@@ -42,10 +51,13 @@ export default function ProcessingSidePanel({ status, jobId, onClose, onCancel }
       <div className="processing-bar-content">
         <div className="processing-bar-left">
           <span className="processing-bar-icon">{statusIcons[status]}</span>
-          <span className="processing-bar-message">{statusMessages[status]}</span>
+          <span className="processing-bar-message">{getStatusMessage()}</span>
           {status === 'processing' && (
             <div className="processing-bar-progress">
-              <div className="processing-bar-progress-fill"></div>
+              <div
+                className="processing-bar-progress-fill"
+                style={{ width: `${progressPercent ?? 0}%` }}
+              ></div>
             </div>
           )}
         </div>

@@ -71,10 +71,20 @@ def process_job_async(job_id: str, uploaded_files: list, original_filenames: lis
             db.update_job_status(job_id, "cancelled")
             return
         
+        # Create progress callback
+        def progress_callback(text: str, percent: int = 0):
+            try:
+                db.update_job_progress(job_id, text, percent)
+            except Exception as e:
+                logger.warning(f"Failed to update job progress: {e}")
+
         # Process contacts with cancellation support
         logger.info(f"Job {job_id} starting contact processing for {len(uploaded_files)} file(s)")
         try:
-            result = filter_service.process_contacts(uploaded_files, settings, job_id, original_filenames, cancel_event)
+            result = filter_service.process_contacts(
+                uploaded_files, settings, job_id, original_filenames,
+                cancel_event, progress_callback
+            )
         except RuntimeError as e:
             if "cancelled" in str(e).lower():
                 logger.info(f"Job {job_id} was cancelled during processing")
@@ -457,7 +467,7 @@ def get_job(job_id: str):
         job = db.get_job(job_id)
         if not job:
             return jsonify({"success": False, "error": "Job not found"}), 404
-        
+
         response = {
             "success": True,
             "job": {
@@ -466,18 +476,20 @@ def get_job(job_id: str):
                 "status": job["status"],
                 "settings": job["settings"],
                 "input_files": job["input_files"],
-                "output_filename": job.get("output_filename")
+                "output_filename": job.get("output_filename"),
+                "progress_text": job.get("progress_text"),
+                "progress_percent": job.get("progress_percent", 0)
             }
         }
-        
+
         if job.get("analytics"):
             response["job"]["analytics"] = job["analytics"]
-        
+
         if job["status"] == "completed" and job.get("output_filename"):
             response["job"]["downloadUrl"] = f"/api/jobs/{job_id}/download"
-        
+
         return jsonify(response), 200
-        
+
     except Exception as e:
         logger.error(f"Get job error: {e}", exc_info=True)
         return jsonify({"success": False, "error": "Failed to retrieve job information"}), 500

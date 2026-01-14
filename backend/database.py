@@ -151,9 +151,19 @@ class Database:
                     status TEXT NOT NULL,
                     output_filename TEXT,
                     settings TEXT,
-                    input_files TEXT
+                    input_files TEXT,
+                    progress_text TEXT,
+                    progress_percent INTEGER DEFAULT 0
                 )
             """)
+
+            # Add progress columns if they don't exist (migration for existing DBs)
+            cursor.execute("PRAGMA table_info(jobs)")
+            job_columns = {row[1] for row in cursor.fetchall()}
+            if 'progress_text' not in job_columns:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN progress_text TEXT")
+            if 'progress_percent' not in job_columns:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN progress_percent INTEGER DEFAULT 0")
             
             # Analytics table
             cursor.execute("""
@@ -296,25 +306,16 @@ class Database:
         
         def _init_preset(conn):
             cursor = conn.cursor()
-            
+
             # Check if default preset exists
-            cursor.execute("SELECT id, settings FROM settings_presets WHERE is_default = 1")
+            cursor.execute("SELECT id FROM settings_presets WHERE is_default = 1")
             existing = cursor.fetchone()
-            
+
             if existing:
-                # Update existing default preset to ensure it matches current defaults
-                existing_settings = json.loads(existing['settings'])
-                if existing_settings != default_settings:
-                    logger.info("Updating default preset to match CLI defaults")
-                    cursor.execute("""
-                        UPDATE settings_presets 
-                        SET settings = ?, name = 'Default (CLI Match)'
-                        WHERE id = ?
-                    """, (json.dumps(default_settings), existing['id']))
-                else:
-                    logger.info("Default preset already matches CLI defaults")
+                # Default preset already exists - don't overwrite user customizations
+                logger.debug("Default preset exists, preserving user settings")
             else:
-                # Create default preset
+                # Create default preset only if none exists
                 preset_id = str(uuid.uuid4())
                 cursor.execute("""
                     INSERT INTO settings_presets (id, name, is_default, settings)
@@ -361,7 +362,7 @@ class Database:
                 cursor.execute("""
                     UPDATE jobs SET status = ? WHERE id = ?
                 """, (status, job_id))
-        
+
         try:
             with self.get_connection() as conn:
                 self._execute_with_retry(lambda: _update_status(conn))
@@ -369,6 +370,22 @@ class Database:
         except Exception as e:
             logger.error(f"Failed to update job status for {job_id}: {e}")
             raise
+
+    def update_job_progress(self, job_id: str, progress_text: str, progress_percent: int = 0):
+        """Update job progress information"""
+        def _update_progress(conn):
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE jobs SET progress_text = ?, progress_percent = ? WHERE id = ?
+            """, (progress_text, progress_percent, job_id))
+
+        try:
+            with self.get_connection() as conn:
+                self._execute_with_retry(lambda: _update_progress(conn))
+            logger.debug(f"Updated job {job_id} progress: {progress_percent}% - {progress_text}")
+        except Exception as e:
+            logger.error(f"Failed to update job progress for {job_id}: {e}")
+            # Don't raise - progress updates shouldn't fail the job
     
     def save_analytics(self, job_id: str, analytics: Dict):
         """Save analytics data for a job"""
