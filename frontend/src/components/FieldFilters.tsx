@@ -1,6 +1,17 @@
 import { useState } from 'react';
-import type { FieldFilter } from '../types';
-import './FieldFilters.css';
+import type { FieldFilter } from '@/types';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { ChevronDown, ChevronRight, X, Plus } from 'lucide-react';
 
 interface FieldFiltersProps {
   filters: FieldFilter[];
@@ -18,10 +29,9 @@ export default function FieldFilters({ filters, onFiltersChange }: FieldFiltersP
   const [isOpen, setIsOpen] = useState(false);
 
   const addFilter = () => {
-    // Find an unused field
     const usedFields = new Set(filters.map(f => f.field));
     const availableField = AVAILABLE_FIELDS.find(f => !usedFields.has(f.value));
-    
+
     if (availableField) {
       onFiltersChange([
         ...filters,
@@ -42,7 +52,7 @@ export default function FieldFilters({ filters, onFiltersChange }: FieldFiltersP
 
   const addFilterValue = (filterIndex: number, value: string) => {
     if (!value.trim()) return;
-    
+
     const updated = [...filters];
     const filter = updated[filterIndex];
     if (!filter.values.includes(value.trim())) {
@@ -63,91 +73,85 @@ export default function FieldFilters({ filters, onFiltersChange }: FieldFiltersP
   };
 
   return (
-    <div className="field-filters">
-      <div className="field-filters-header">
-        <h3 className="field-filters-title">Field Filters</h3>
-        <button
-          className="field-filters-toggle"
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium">Field Filters</h3>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0"
           onClick={() => setIsOpen(!isOpen)}
           aria-expanded={isOpen}
         >
-          {isOpen ? '▼' : '▶'}
-        </button>
+          {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </Button>
       </div>
 
       {isOpen && (
-        <div className="field-filters-content">
-          <p className="field-filters-description">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
             Filter contacts by specific field values. Only contacts matching the selected values will be included.
           </p>
 
           {filters.length === 0 ? (
-            <div className="field-filters-empty">
-              <p>No field filters added. Click "Add Filter" to start filtering by field values.</p>
+            <div className="p-4 text-center bg-muted/50 rounded-lg border border-dashed">
+              <p className="text-sm text-muted-foreground">No field filters added</p>
             </div>
           ) : (
-            <div className="field-filters-list">
+            <div className="space-y-3">
               {filters.map((filter, filterIndex) => (
-                <div key={filterIndex} className="field-filter-item">
-                  <div className="field-filter-header">
-                    <select
-                      className="field-filter-select"
-                      value={filter.field}
-                      onChange={(e) => updateFilterField(filterIndex, e.target.value)}
-                    >
-                      {availableFieldsForSelect(filter.field).map(field => (
-                        <option key={field.value} value={field.value}>
-                          {field.label}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="field-filter-remove"
+                <div key={filterIndex} className="p-3 border rounded-lg space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Select value={filter.field} onValueChange={(value) => updateFilterField(filterIndex, value)}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableFieldsForSelect(filter.field).map(field => (
+                          <SelectItem key={field.value} value={field.value}>
+                            {field.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       onClick={() => removeFilter(filterIndex)}
-                      aria-label="Remove filter"
                     >
-                      ×
-                    </button>
+                      <X className="h-4 w-4" />
+                    </Button>
                   </div>
 
-                  <div className="field-filter-values">
-                    <label className="field-filter-values-label">
-                      Values to include (leave empty to include all):
-                    </label>
-                    <div className="field-filter-values-input-group">
-                      <input
-                        type="text"
-                        className="field-filter-value-input"
-                        placeholder="Enter value and press Enter"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            addFilterValue(filterIndex, e.currentTarget.value);
-                            e.currentTarget.value = '';
-                          }
-                        }}
-                      />
-                    </div>
-                    {filter.values.length > 0 && (
-                      <div className="field-filter-values-list">
+                  <div className="space-y-2">
+                    <Label className="text-xs">Values to include (leave empty for all):</Label>
+                    <Input
+                      placeholder="Enter value and press Enter"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addFilterValue(filterIndex, e.currentTarget.value);
+                          e.currentTarget.value = '';
+                        }
+                      }}
+                    />
+                    {filter.values.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
                         {filter.values.map((value, valueIndex) => (
-                          <span key={valueIndex} className="field-filter-value-tag">
+                          <Badge key={valueIndex} variant="secondary" className="gap-1">
                             {value}
                             <button
-                              className="field-filter-value-remove"
                               onClick={() => removeFilterValue(filterIndex, valueIndex)}
-                              aria-label={`Remove ${value}`}
+                              className="ml-1 hover:text-destructive"
                             >
-                              ×
+                              <X className="h-3 w-3" />
                             </button>
-                          </span>
+                          </Badge>
                         ))}
                       </div>
-                    )}
-                    {filter.values.length === 0 && (
-                      <p className="field-filter-hint">
-                        No values specified - all contacts will be included for this field
-                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">All contacts will be included for this field</p>
                     )}
                   </div>
                 </div>
@@ -156,17 +160,13 @@ export default function FieldFilters({ filters, onFiltersChange }: FieldFiltersP
           )}
 
           {filters.length < AVAILABLE_FIELDS.length && (
-            <button
-              className="field-filters-add"
-              onClick={addFilter}
-              type="button"
-            >
-              + Add Filter
-            </button>
+            <Button variant="outline" size="sm" onClick={addFilter} type="button">
+              <Plus className="h-4 w-4 mr-1" />
+              Add Filter
+            </Button>
           )}
         </div>
       )}
     </div>
   );
 }
-

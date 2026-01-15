@@ -1,6 +1,11 @@
 import { useState } from 'react';
-import type { TierFilterConfig } from '../types';
-import './TierFilterConfig.css';
+import type { TierFilterConfig } from '@/types';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { X } from 'lucide-react';
 
 interface TierFilterConfigProps {
   tierNumber: 1 | 2 | 3;
@@ -51,17 +56,15 @@ export default function TierFilterConfigComponent({
   };
 
   return (
-    <div className="tier-filter-config">
-      <h4 className="tier-filter-title">Tier {tierNumber} Filter Configuration</h4>
-      
-      <div className="filter-section">
-        <label className="filter-label">
-          Include Keywords (Job titles that match these will be included)
-        </label>
-        <div className="keyword-input-group">
-          <input
-            type="text"
-            className="keyword-input"
+    <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+      <h4 className="font-medium">Tier {tierNumber} Filter Configuration</h4>
+
+      {/* Include Keywords */}
+      <div className="space-y-2">
+        <Label>Include Keywords</Label>
+        <p className="text-xs text-muted-foreground">Job titles matching these will be included</p>
+        <div className="flex gap-2">
+          <Input
             value={includeKeyword}
             onChange={(e) => setIncludeKeyword(e.target.value)}
             onKeyDown={(e) => {
@@ -71,45 +74,39 @@ export default function TierFilterConfigComponent({
               }
             }}
             placeholder="e.g., cio, chief investment officer"
+            className="flex-1"
           />
-          <button
-            type="button"
-            className="add-keyword-button"
-            onClick={addIncludeKeyword}
-            disabled={!includeKeyword.trim()}
-          >
+          <Button type="button" onClick={addIncludeKeyword} disabled={!includeKeyword.trim()} size="sm">
             Add
-          </button>
+          </Button>
         </div>
-        <div className="keywords-list">
+        <div className="flex flex-wrap gap-1.5">
           {config.includeKeywords.length === 0 ? (
-            <p className="empty-hint">No include keywords. Add keywords to filter job titles.</p>
+            <p className="text-xs text-muted-foreground">No include keywords added</p>
           ) : (
             config.includeKeywords.map((keyword, idx) => (
-              <span key={idx} className="keyword-tag">
+              <Badge key={idx} variant="secondary" className="bg-green-500/15 text-green-600 gap-1">
                 {keyword}
                 <button
                   type="button"
-                  className="remove-keyword"
                   onClick={() => removeIncludeKeyword(keyword)}
+                  className="ml-1 hover:text-green-800"
                   aria-label={`Remove ${keyword}`}
                 >
-                  ×
+                  <X className="h-3 w-3" />
                 </button>
-              </span>
+              </Badge>
             ))
           )}
         </div>
       </div>
 
-      <div className="filter-section">
-        <label className="filter-label">
-          Exclude Keywords (Job titles containing these will be excluded)
-        </label>
-        <div className="keyword-input-group">
-          <input
-            type="text"
-            className="keyword-input"
+      {/* Exclude Keywords */}
+      <div className="space-y-2">
+        <Label>Exclude Keywords</Label>
+        <p className="text-xs text-muted-foreground">Job titles containing these will be excluded</p>
+        <div className="flex gap-2">
+          <Input
             value={excludeKeyword}
             onChange={(e) => setExcludeKeyword(e.target.value)}
             onKeyDown={(e) => {
@@ -119,51 +116,46 @@ export default function TierFilterConfigComponent({
               }
             }}
             placeholder="e.g., operations, hr, marketing"
+            className="flex-1"
           />
-          <button
-            type="button"
-            className="add-keyword-button"
-            onClick={addExcludeKeyword}
-            disabled={!excludeKeyword.trim()}
-          >
+          <Button type="button" onClick={addExcludeKeyword} disabled={!excludeKeyword.trim()} size="sm">
             Add
-          </button>
+          </Button>
         </div>
-        <div className="keywords-list">
+        <div className="flex flex-wrap gap-1.5">
           {config.excludeKeywords.length === 0 ? (
-            <p className="empty-hint">No exclude keywords. Add keywords to exclude job titles.</p>
+            <p className="text-xs text-muted-foreground">No exclude keywords added</p>
           ) : (
             config.excludeKeywords.map((keyword, idx) => (
-              <span key={idx} className="keyword-tag exclude">
+              <Badge key={idx} variant="secondary" className="bg-red-500/15 text-red-600 gap-1">
                 {keyword}
                 <button
                   type="button"
-                  className="remove-keyword"
                   onClick={() => removeExcludeKeyword(keyword)}
+                  className="ml-1 hover:text-red-800"
                   aria-label={`Remove ${keyword}`}
                 >
-                  ×
+                  <X className="h-3 w-3" />
                 </button>
-              </span>
+              </Badge>
             ))
           )}
         </div>
       </div>
 
-      <div className="filter-section">
-        <label className="filter-toggle">
-          <input
-            type="checkbox"
-            checked={config.requireInvestmentTeam}
-            onChange={(e) => onChange({ ...config, requireInvestmentTeam: e.target.checked })}
-          />
-          <span>Require investment team and portfolio management role</span>
-        </label>
-        <p className="filter-hint">
-          If checked, contacts must have "investment team" or "investment" AND "portfolio management" or "portfolio" in their ROLE field
-        </p>
+      {/* Require Investment Team */}
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <Label>Require Investment Team</Label>
+          <p className="text-xs text-muted-foreground">
+            Must have "investment team" or "portfolio management" in ROLE field
+          </p>
+        </div>
+        <Switch
+          checked={config.requireInvestmentTeam}
+          onCheckedChange={(checked) => onChange({ ...config, requireInvestmentTeam: checked })}
+        />
       </div>
     </div>
   );
 }
-
