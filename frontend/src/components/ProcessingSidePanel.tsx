@@ -1,5 +1,9 @@
 import { useEffect } from 'react';
-import './ProcessingSidePanel.css';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
+import { Clock, Loader2, CheckCircle2, XCircle, Ban, X, ArrowRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface ProcessingSidePanelProps {
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | null;
@@ -10,9 +14,15 @@ interface ProcessingSidePanelProps {
   progressPercent?: number;
 }
 
-export default function ProcessingSidePanel({ status, jobId, onClose, onCancel, progressText, progressPercent }: ProcessingSidePanelProps) {
+export default function ProcessingSidePanel({
+  status,
+  jobId,
+  onClose,
+  onCancel,
+  progressText,
+  progressPercent
+}: ProcessingSidePanelProps) {
   useEffect(() => {
-    // Auto-close after 5 seconds if completed
     if (status === 'completed' && onClose) {
       const timer = setTimeout(() => {
         onClose();
@@ -23,7 +33,6 @@ export default function ProcessingSidePanel({ status, jobId, onClose, onCancel, 
 
   if (!status || !jobId) return null;
 
-  // Use progress text from backend if available, otherwise fall back to defaults
   const getStatusMessage = (): string => {
     if (status === 'processing' && progressText) {
       return progressText;
@@ -38,56 +47,54 @@ export default function ProcessingSidePanel({ status, jobId, onClose, onCancel, 
     return defaultMessages[status] || 'Unknown status';
   };
 
-  const statusIcons: Record<string, string> = {
-    pending: '⏳',
-    processing: '⚙️',
-    completed: '✅',
-    failed: '❌',
-    cancelled: '🚫',
+  const statusConfig = {
+    pending: { icon: Clock, className: 'text-muted-foreground' },
+    processing: { icon: Loader2, className: 'text-blue-500 animate-spin' },
+    completed: { icon: CheckCircle2, className: 'text-green-500' },
+    failed: { icon: XCircle, className: 'text-destructive' },
+    cancelled: { icon: Ban, className: 'text-muted-foreground' },
   };
 
+  const config = statusConfig[status];
+  const Icon = config.icon;
+
   return (
-    <div className={`processing-bar ${status}`}>
-      <div className="processing-bar-content">
-        <div className="processing-bar-left">
-          <span className="processing-bar-icon">{statusIcons[status]}</span>
-          <span className="processing-bar-message">{getStatusMessage()}</span>
-          {status === 'processing' && (
-            <div className="processing-bar-progress">
-              <div
-                className="processing-bar-progress-fill"
-                style={{ width: `${progressPercent ?? 0}%` }}
-              ></div>
-            </div>
-          )}
+    <div className={cn(
+      'fixed bottom-4 right-4 z-50 w-96 rounded-lg border bg-background shadow-lg p-4',
+      status === 'completed' && 'border-green-500',
+      status === 'failed' && 'border-destructive'
+    )}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3 flex-1">
+          <Icon className={cn('h-5 w-5 mt-0.5 shrink-0', config.className)} />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm">{getStatusMessage()}</p>
+            {status === 'processing' && (
+              <Progress value={progressPercent ?? 0} className="mt-2 h-1.5" />
+            )}
+          </div>
         </div>
-        <div className="processing-bar-right">
+        <div className="flex items-center gap-2 shrink-0">
           {status === 'processing' && onCancel && (
-            <button 
-              className="processing-bar-cancel" 
-              onClick={onCancel} 
-              aria-label="Cancel"
-            >
+            <Button variant="outline" size="sm" onClick={onCancel}>
               Cancel
-            </button>
+            </Button>
           )}
           {status === 'completed' && (
-            <a href={`/analytics/${jobId}`} className="processing-bar-link">
-              View Analytics →
-            </a>
+            <Button variant="default" size="sm" asChild>
+              <Link to={`/analytics/${jobId}`}>
+                View
+                <ArrowRight className="ml-1 h-3 w-3" />
+              </Link>
+            </Button>
           )}
           {onClose && (
-            <button 
-              className="processing-bar-close" 
-              onClick={onClose} 
-              aria-label="Close"
-            >
-              ×
-            </button>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
+              <X className="h-4 w-4" />
+            </Button>
           )}
         </div>
       </div>
     </div>
   );
 }
-

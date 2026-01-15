@@ -1,18 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import FileUpload from '../components/FileUpload';
-import ConfigurationPanel from '../components/ConfigurationPanel';
-import ProcessingSidePanel from '../components/ProcessingSidePanel';
-import PreviousFilesSelector from '../components/PreviousFilesSelector';
-import { uploadFiles, processContacts, listUploadedFiles, cancelJob, type FileValidationResult } from '../services/api';
-import { generatePrefixFromFilenames } from '../utils/filenameUtils';
-import type { ProcessingSettings } from '../types';
-import './ProcessPage.css';
+import FileUpload from '@/components/FileUpload';
+import ConfigurationPanel from '@/components/ConfigurationPanel';
+import ProcessingSidePanel from '@/components/ProcessingSidePanel';
+import PreviousFilesSelector from '@/components/PreviousFilesSelector';
+import { uploadFiles, processContacts, listUploadedFiles, cancelJob, type FileValidationResult } from '@/services/api';
+import { generatePrefixFromFilenames } from '@/utils/filenameUtils';
+import type { ProcessingSettings } from '@/types';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { FolderOpen, X } from 'lucide-react';
 
-// Store file validations in a map keyed by file name + size
 type FileValidationMap = Map<string, FileValidationResult>;
 
-// Info about a previous file
 interface PreviousFileInfo {
   id: string;
   originalName: string;
@@ -32,7 +33,6 @@ export default function ProcessPage() {
   const [previousFileInfo, setPreviousFileInfo] = useState<Map<string, PreviousFileInfo>>(new Map());
   const [showProcessingPanel, setShowProcessingPanel] = useState(false);
   const [showPreviousFilesModal, setShowPreviousFilesModal] = useState(false);
-  // Initialize with default values - ConfigurationPanel will update with preset
   const [settings, setSettings] = useState<ProcessingSettings>({
     includeAllFirms: false,
     findEmails: true,
@@ -42,21 +42,9 @@ export default function ProcessPage() {
     tier2Limit: 6,
     tier3Limit: 3,
     userPrefix: 'Combined-Contacts',
-    tier1Filters: {
-      includeKeywords: [],
-      excludeKeywords: [],
-      requireInvestmentTeam: false,
-    },
-    tier2Filters: {
-      includeKeywords: [],
-      excludeKeywords: [],
-      requireInvestmentTeam: true,
-    },
-    tier3Filters: {
-      includeKeywords: [],
-      excludeKeywords: [],
-      requireInvestmentTeam: false,
-    },
+    tier1Filters: { includeKeywords: [], excludeKeywords: [], requireInvestmentTeam: false },
+    tier2Filters: { includeKeywords: [], excludeKeywords: [], requireInvestmentTeam: true },
+    tier3Filters: { includeKeywords: [], excludeKeywords: [], requireInvestmentTeam: false },
     firmExclusionList: '',
     firmInclusionList: '',
     contactExclusionList: '',
@@ -70,72 +58,42 @@ export default function ProcessPage() {
   const [progressPercent, setProgressPercent] = useState<number>(0);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /**
-   * Update the output prefix based on selected files
-   * @param uploadedFiles - Currently uploaded File objects
-   * @param previousFileIds - IDs of selected previous files
-   */
   const updatePrefixFromFiles = useCallback(async (
     uploadedFiles: File[],
     previousFileIds: string[]
   ) => {
     try {
       const allFilenames: (File | string)[] = [...uploadedFiles];
-      
-      // Fetch names of previously selected files
       if (previousFileIds.length > 0) {
         const previousFiles = await listUploadedFiles();
-        const selectedPreviousFiles = previousFiles.filter(file =>
-          previousFileIds.includes(file.id)
-        );
-        selectedPreviousFiles.forEach(file => {
-          allFilenames.push(file.originalName);
-        });
+        const selectedPreviousFiles = previousFiles.filter(file => previousFileIds.includes(file.id));
+        selectedPreviousFiles.forEach(file => allFilenames.push(file.originalName));
       }
-      
-      // Generate prefix from all filenames
       if (allFilenames.length > 0) {
         const generatedPrefix = generatePrefixFromFilenames(allFilenames);
-        setSettings(prev => ({
-          ...prev,
-          userPrefix: generatedPrefix,
-        }));
+        setSettings(prev => ({ ...prev, userPrefix: generatedPrefix }));
       }
     } catch (error) {
-      // Error logged to console for debugging in development
-      if (import.meta.env.DEV) {
-        console.error('Failed to update prefix from files:', error);
-      }
-      // If we have uploaded files, still try to generate prefix from them
+      if (import.meta.env.DEV) console.error('Failed to update prefix from files:', error);
       if (uploadedFiles.length > 0) {
         const generatedPrefix = generatePrefixFromFilenames(uploadedFiles);
-        setSettings(prev => ({
-          ...prev,
-          userPrefix: generatedPrefix,
-        }));
+        setSettings(prev => ({ ...prev, userPrefix: generatedPrefix }));
       }
     }
   }, []);
 
   const handleFilesSelected = (files: File[], validations?: FileValidationResult[]) => {
     setUploadedFiles(prev => {
-      // Avoid duplicates by checking file name and size
       const newFiles = files.filter(newFile =>
-        !prev.some(existingFile =>
-          existingFile.name === newFile.name && existingFile.size === newFile.size
-        )
+        !prev.some(existingFile => existingFile.name === newFile.name && existingFile.size === newFile.size)
       );
       return [...prev, ...newFiles];
     });
-
-    // Store validations if provided
     if (validations && validations.length > 0) {
       setFileValidations(prev => {
         const newMap = new Map(prev);
         files.forEach((file, index) => {
-          if (validations[index]) {
-            newMap.set(getFileKey(file), validations[index]);
-          }
+          if (validations[index]) newMap.set(getFileKey(file), validations[index]);
         });
         return newMap;
       });
@@ -145,7 +103,6 @@ export default function ProcessPage() {
   const handleRemoveFile = (index: number) => {
     setUploadedFiles(prev => {
       const fileToRemove = prev[index];
-      // Also remove validation
       if (fileToRemove) {
         setFileValidations(prevValidations => {
           const newMap = new Map(prevValidations);
@@ -161,7 +118,6 @@ export default function ProcessPage() {
     return fileValidations.get(getFileKey(file));
   }, [fileValidations]);
 
-  // Handle validation results from previous files selector
   const handlePreviousFileValidated = useCallback((
     fileId: string,
     validation: FileValidationResult,
@@ -169,17 +125,11 @@ export default function ProcessPage() {
   ) => {
     setPreviousFileInfo(prev => {
       const newMap = new Map(prev);
-      newMap.set(fileId, {
-        id: fileInfo.id,
-        originalName: fileInfo.originalName,
-        fileSize: fileInfo.fileSize,
-        validation
-      });
+      newMap.set(fileId, { ...fileInfo, validation });
       return newMap;
     });
   }, []);
 
-  // Get selected previous files with their info
   const selectedPreviousFiles = selectedPreviousFileIds
     .map(id => previousFileInfo.get(id))
     .filter((info): info is PreviousFileInfo => info !== undefined);
@@ -196,7 +146,6 @@ export default function ProcessPage() {
     setSelectedPreviousFileIds(prev => prev.filter(id => id !== fileId));
   };
 
-  // Auto-update prefix when files or previous file selection changes
   useEffect(() => {
     if (uploadedFiles.length > 0 || selectedPreviousFileIds.length > 0) {
       updatePrefixFromFiles(uploadedFiles, selectedPreviousFileIds);
@@ -218,40 +167,26 @@ export default function ProcessPage() {
     try {
       let filePaths: string[] = [];
       let fileIds: string[] = [];
-      
-      // Upload new files if any
+
       if (uploadedFiles.length > 0) {
         const uploadResult = await uploadFiles(uploadedFiles);
         filePaths = uploadResult.paths || uploadResult.files;
         fileIds = uploadResult.fileIds || [];
       }
-      
-      // Combine new file IDs with previously selected file IDs
+
       const allFileIds = [...fileIds, ...selectedPreviousFileIds];
-      
-      // Start processing - pass filePaths for new files and fileIds for all files
-      const processResult = await processContacts(
-        filePaths, 
-        settings, 
-        allFileIds.length > 0 ? allFileIds : undefined
-      );
-      
+      const processResult = await processContacts(filePaths, settings, allFileIds.length > 0 ? allFileIds : undefined);
+
       setCurrentJobId(processResult.jobId);
       setProcessingStatus('processing');
 
-      // Poll for job completion
       pollIntervalRef.current = setInterval(async () => {
         try {
-          const { getJob } = await import('../services/api');
+          const { getJob } = await import('@/services/api');
           const job = await getJob(processResult.jobId);
 
-          // Update progress info
-          if (job.progress_text) {
-            setProgressText(job.progress_text);
-          }
-          if (job.progress_percent !== undefined) {
-            setProgressPercent(job.progress_percent);
-          }
+          if (job.progress_text) setProgressText(job.progress_text);
+          if (job.progress_percent !== undefined) setProgressPercent(job.progress_percent);
 
           if (job.status === 'completed') {
             if (pollIntervalRef.current) {
@@ -260,10 +195,7 @@ export default function ProcessPage() {
             }
             setProcessingStatus('completed');
             setIsProcessing(false);
-            // Navigate to analytics after a short delay
-            setTimeout(() => {
-              navigate(`/analytics/${processResult.jobId}`);
-            }, 2000);
+            setTimeout(() => navigate(`/analytics/${processResult.jobId}`), 2000);
           } else if (job.status === 'failed' || job.status === 'cancelled') {
             if (pollIntervalRef.current) {
               clearInterval(pollIntervalRef.current);
@@ -273,14 +205,10 @@ export default function ProcessPage() {
             setIsProcessing(false);
           }
         } catch (error) {
-          // Error logged to console for debugging in development
-          if (import.meta.env.DEV) {
-            console.error('Error polling job status:', error);
-          }
+          if (import.meta.env.DEV) console.error('Error polling job status:', error);
         }
       }, 2000);
 
-      // Clear interval after 5 minutes (timeout)
       setTimeout(() => {
         if (pollIntervalRef.current) {
           clearInterval(pollIntervalRef.current);
@@ -293,10 +221,7 @@ export default function ProcessPage() {
       }, 5 * 60 * 1000);
 
     } catch (error) {
-      // Error logged to console for debugging in development
-      if (import.meta.env.DEV) {
-        console.error('Processing error:', error);
-      }
+      if (import.meta.env.DEV) console.error('Processing error:', error);
       setProcessingStatus('failed');
       setIsProcessing(false);
       alert('Failed to process files. Please try again.');
@@ -305,30 +230,22 @@ export default function ProcessPage() {
 
   const handleCancel = async () => {
     if (!currentJobId) return;
-    
     try {
       await cancelJob(currentJobId);
-      
-      // Stop polling
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
       }
-      
-      // Update status
       setProcessingStatus('cancelled');
       setIsProcessing(false);
     } catch (error) {
-      // Error logged to console for debugging in development
-      if (import.meta.env.DEV) {
-        console.error('Error cancelling job:', error);
-      }
+      if (import.meta.env.DEV) console.error('Error cancelling job:', error);
       alert('Failed to cancel job. Please try again.');
     }
   };
 
   return (
-    <div className={`process-page ${showProcessingPanel ? 'with-processing-bar' : ''}`}>
+    <div className="space-y-6">
       {showProcessingPanel && (
         <ProcessingSidePanel
           status={processingStatus}
@@ -348,24 +265,24 @@ export default function ProcessPage() {
         onFileValidated={handlePreviousFileValidated}
       />
 
-      <h1>Process Contacts</h1>
-      <p className="page-description">
-        Upload Excel files or select from previous uploads, then configure filtering options.
-      </p>
+      <div>
+        <h1 className="text-3xl font-bold mb-2">Process Contacts</h1>
+        <p className="text-muted-foreground">
+          Upload Excel files or select from previous uploads, then configure filtering options.
+        </p>
+      </div>
 
-      <div className="process-layout-vertical">
-        <div className="upload-section">
-          <div className="upload-header">
-            <h2>Input Files</h2>
-            <button
-              className="select-previous-button"
-              onClick={() => setShowPreviousFilesModal(true)}
-            >
+      <div className="space-y-6">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Input Files</h2>
+            <Button variant="outline" onClick={() => setShowPreviousFilesModal(true)}>
+              <FolderOpen className="mr-2 h-4 w-4" />
               Select Previous Uploads
               {selectedPreviousFileIds.length > 0 && (
-                <span className="previous-count">({selectedPreviousFileIds.length})</span>
+                <Badge variant="secondary" className="ml-2">{selectedPreviousFileIds.length}</Badge>
               )}
-            </button>
+            </Button>
           </div>
 
           <FileUpload
@@ -375,44 +292,38 @@ export default function ProcessPage() {
             getFileValidation={getFileValidation}
           />
 
-          {/* Show selected previous files */}
           {selectedPreviousFiles.length > 0 && (
-            <div className="selected-previous-files">
-              <h3>Selected Previous Files ({selectedPreviousFiles.length})</h3>
-              <div className="file-list">
+            <div className="space-y-3">
+              <h3 className="font-medium">Selected Previous Files ({selectedPreviousFiles.length})</h3>
+              <div className="space-y-2">
                 {selectedPreviousFiles.map((fileInfo) => (
-                  <div key={fileInfo.id} className="file-item previous-file">
-                    <div className="file-info-content">
-                      <span className="file-name">{fileInfo.originalName}</span>
-                      <span className="file-size">{formatFileSize(fileInfo.fileSize)}</span>
+                  <Card key={fileInfo.id} className="flex items-center gap-4 p-4 bg-muted/30">
+                    <div className="flex-1 flex flex-col gap-1 min-w-0">
+                      <span className="text-sm font-medium break-words">{fileInfo.originalName}</span>
+                      <span className="text-xs text-muted-foreground">{formatFileSize(fileInfo.fileSize)}</span>
                       {fileInfo.validation && (
-                        <div className="file-validation-badges">
+                        <div className="flex flex-wrap gap-1 mt-1">
                           {fileInfo.validation.contacts_sheet && (
-                            <span className="validation-badge contacts">
-                              Contacts
-                            </span>
+                            <Badge variant="secondary" className="bg-green-500/15 text-green-600 text-xs">Contacts</Badge>
                           )}
                           {fileInfo.validation.accounts_sheet && (
-                            <span className="validation-badge accounts">
-                              Accounts
-                            </span>
+                            <Badge variant="secondary" className="bg-blue-500/15 text-blue-600 text-xs">Accounts</Badge>
                           )}
                           {fileInfo.validation.can_merge_aum && (
-                            <span className="validation-badge aum">
-                              AUM
-                            </span>
+                            <Badge variant="secondary" className="bg-purple-500/15 text-purple-600 text-xs">AUM</Badge>
                           )}
                         </div>
                       )}
                     </div>
-                    <button
-                      className="file-remove"
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       onClick={() => handleRemovePreviousFile(fileInfo.id)}
-                      aria-label="Remove file"
                     >
-                      x
-                    </button>
-                  </div>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </Card>
                 ))}
               </div>
             </div>
@@ -429,4 +340,3 @@ export default function ProcessPage() {
     </div>
   );
 }
-

@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { listUploadedFiles, validateUploadedFile, type FileValidationResult, type UploadedFile } from '../services/api';
-import { formatDateTimePacific } from '../utils/dateUtils';
-import './PreviousFilesSelector.css';
+import { listUploadedFiles, validateUploadedFile, type FileValidationResult, type UploadedFile } from '@/services/api';
+import { formatDateTimePacific } from '@/utils/dateUtils';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface PreviousFilesSelectorProps {
   isOpen: boolean;
@@ -34,7 +40,6 @@ export default function PreviousFilesSelector({
         return newMap;
       });
 
-      // Notify parent of validation result
       if (onFileValidated) {
         onFileValidated(fileId, validation, fileInfo);
       }
@@ -56,29 +61,23 @@ export default function PreviousFilesSelector({
       setIsLoading(true);
       try {
         const uploadedFiles = await listUploadedFiles();
-        // Only show files that exist and can be selected
         const availableFiles = uploadedFiles.filter(file => file.fileExists !== false);
         setFiles(availableFiles);
 
-        // Use cached validation or load validation for files without it
         const newValidations = new Map<string, FileValidationResult>();
         const filesToValidate: UploadedFile[] = [];
 
         availableFiles.forEach(file => {
           if (file.validation) {
-            // Use cached validation
             newValidations.set(file.id, file.validation);
-            // Notify parent of validation result
             if (onFileValidated) {
               onFileValidated(file.id, file.validation, file);
             }
           } else if (!loadingValidations.has(file.id) && !fileValidations.has(file.id)) {
-            // Queue for validation
             filesToValidate.push(file);
           }
         });
 
-        // Update state with cached validations
         if (newValidations.size > 0) {
           setFileValidations(prev => {
             const merged = new Map(prev);
@@ -87,12 +86,10 @@ export default function PreviousFilesSelector({
           });
         }
 
-        // Load validation for files without cached validation
         filesToValidate.forEach(file => {
           loadValidationForFile(file.id, file);
         });
       } catch (error) {
-        // Error logged to console for debugging in development
         if (import.meta.env.DEV) {
           console.error('Failed to load uploaded files:', error);
         }
@@ -126,7 +123,12 @@ export default function PreviousFilesSelector({
     const isLoadingVal = loadingValidations.has(fileId);
 
     if (isLoadingVal) {
-      return <span className="validation-loading">Validating...</span>;
+      return (
+        <span className="text-xs text-muted-foreground flex items-center gap-1">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Validating...
+        </span>
+      );
     }
 
     if (!validation) {
@@ -134,98 +136,101 @@ export default function PreviousFilesSelector({
     }
 
     return (
-      <div className="file-validation-badges">
+      <div className="flex flex-wrap gap-1">
         {validation.contacts_sheet && (
-          <span className="validation-badge contacts">
+          <Badge variant="secondary" className="bg-green-500/15 text-green-600 text-xs">
             Contacts ({validation.sheets.find(s => s.name === validation.contacts_sheet)?.row_count?.toLocaleString() || '?'})
-          </span>
+          </Badge>
         )}
         {validation.accounts_sheet && (
-          <span className="validation-badge accounts">
+          <Badge variant="secondary" className="bg-blue-500/15 text-blue-600 text-xs">
             Accounts ({validation.sheets.find(s => s.name === validation.accounts_sheet)?.row_count?.toLocaleString() || '?'})
-          </span>
+          </Badge>
         )}
         {validation.can_merge_aum && (
-          <span className="validation-badge aum">
+          <Badge variant="secondary" className="bg-purple-500/15 text-purple-600 text-xs">
             AUM
-          </span>
+          </Badge>
         )}
         {!validation.can_process && (
-          <span className="validation-badge error">
+          <Badge variant="destructive" className="text-xs">
             Invalid
-          </span>
+          </Badge>
         )}
       </div>
     );
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="previous-files-modal-overlay" onClick={onClose}>
-      <div className="previous-files-modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>Select Previous Uploads</h2>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
-            x
-          </button>
-        </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Select Previous Uploads</DialogTitle>
+        </DialogHeader>
 
-        <div className="modal-content">
+        <div className="py-4">
           {isLoading ? (
-            <div className="selector-loading">Loading files...</div>
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              Loading files...
+            </div>
           ) : files.length === 0 ? (
-            <div className="selector-empty">
-              <p>No previously uploaded files</p>
-              <p className="selector-empty-hint">Upload files to see them here for future use</p>
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">No previously uploaded files</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Upload files to see them here for future use
+              </p>
             </div>
           ) : (
-            <div className="selector-list">
-              {files.map((file) => {
-                const validation = fileValidations.get(file.id);
-                const isInvalid = validation && !validation.can_process;
+            <ScrollArea className="h-[400px] pr-4">
+              <div className="space-y-2">
+                {files.map((file) => {
+                  const validation = fileValidations.get(file.id);
+                  const isInvalid = validation && !validation.can_process;
+                  const isSelected = selectedFileIds.includes(file.id);
 
-                return (
-                  <label
-                    key={file.id}
-                    className={`selector-item ${isInvalid ? 'file-invalid' : ''} ${selectedFileIds.includes(file.id) ? 'selected' : ''}`}
-                    htmlFor={`file-checkbox-${file.id}`}
-                  >
-                    <input
-                      id={`file-checkbox-${file.id}`}
-                      type="checkbox"
-                      checked={selectedFileIds.includes(file.id)}
-                      onChange={() => handleToggleFile(file.id)}
-                      className="selector-checkbox"
-                      disabled={isInvalid}
-                    />
-                    <div className="selector-item-content">
-                      <div className="selector-item-name">
-                        {file.originalName}
+                  return (
+                    <label
+                      key={file.id}
+                      htmlFor={`file-checkbox-${file.id}`}
+                      className={cn(
+                        'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors',
+                        isSelected && 'bg-accent border-primary',
+                        isInvalid && 'opacity-50 cursor-not-allowed',
+                        !isSelected && !isInvalid && 'hover:bg-muted/50'
+                      )}
+                    >
+                      <Checkbox
+                        id={`file-checkbox-${file.id}`}
+                        checked={isSelected}
+                        onCheckedChange={() => handleToggleFile(file.id)}
+                        disabled={isInvalid}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <p className="font-medium text-sm break-words">{file.originalName}</p>
+                        {renderValidationBadges(file.id)}
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>{formatFileSize(file.fileSize)}</span>
+                          <span>-</span>
+                          <span>{formatDateTimePacific(file.uploadedAt)}</span>
+                        </div>
                       </div>
-                      {renderValidationBadges(file.id)}
-                      <div className="selector-item-meta">
-                        <span>{formatFileSize(file.fileSize)}</span>
-                        <span className="selector-item-separator">-</span>
-                        <span>{formatDateTimePacific(file.uploadedAt)}</span>
-                      </div>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </ScrollArea>
           )}
         </div>
 
-        <div className="modal-footer">
-          <span className="selected-count">
+        <DialogFooter className="flex items-center justify-between sm:justify-between">
+          <span className="text-sm text-muted-foreground">
             {selectedFileIds.length} file{selectedFileIds.length !== 1 ? 's' : ''} selected
           </span>
-          <button className="modal-done-button" onClick={onClose}>
-            Done
-          </button>
-        </div>
-      </div>
-    </div>
+          <Button onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

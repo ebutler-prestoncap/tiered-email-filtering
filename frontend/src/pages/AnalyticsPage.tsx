@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getJob, downloadResults, createPreset, downloadIndividualFile } from '../services/api';
-import type { Job, FirmTypeBreakdownEntry, FileInZipEntry } from '../types';
-import './AnalyticsPage.css';
+import { getJob, downloadResults, createPreset, downloadIndividualFile } from '@/services/api';
+import type { Job, FirmTypeBreakdownEntry, FileInZipEntry } from '@/types';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Loader2, ArrowLeft, Download, Save, ChevronDown, ChevronRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export default function AnalyticsPage() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -21,11 +28,11 @@ export default function AnalyticsPage() {
       loadJob();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId]); // loadJob is stable and doesn't need to be in deps
+  }, [jobId]);
 
   const loadJob = async () => {
     if (!jobId) return;
-    
+
     try {
       setLoading(true);
       const jobData = await getJob(jobId);
@@ -33,7 +40,6 @@ export default function AnalyticsPage() {
       setError(null);
     } catch (err) {
       setError('Failed to load job data');
-      // Error logged to console for debugging in development
       if (import.meta.env.DEV) {
         console.error('Failed to load job:', err);
       }
@@ -52,6 +58,11 @@ export default function AnalyticsPage() {
     return `${year}${month}${day}_${hours}${minutes}${seconds}`;
   };
 
+  const getUserPrefix = (): string => {
+    const prefix = job?.settings?.userPrefix || 'Combined-Contacts';
+    return prefix.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
+  };
+
   const handleDownload = async () => {
     if (!jobId) return;
 
@@ -61,13 +72,11 @@ export default function AnalyticsPage() {
       const a = document.createElement('a');
       a.href = url;
 
-      // Generate filename using same method as CSV exports (user prefix from settings)
       const prefix = getUserPrefix();
       const timestamp = job?.created_at
         ? getTimestamp(new Date(job.created_at))
         : getTimestamp(new Date());
 
-      // Determine file extension based on whether it's a separated job
       const isSeparated = job?.analytics?.is_separated_by_firm_type || job?.settings?.separateByFirmType;
       const extension = isSeparated ? '.zip' : '.xlsx';
       a.download = `${prefix}_${timestamp}${extension}`;
@@ -78,7 +87,6 @@ export default function AnalyticsPage() {
       document.body.removeChild(a);
     } catch (err) {
       alert('Failed to download file');
-      // Error logged to console for debugging in development
       if (import.meta.env.DEV) {
         console.error('Download error:', err);
       }
@@ -108,28 +116,25 @@ export default function AnalyticsPage() {
 
   const handleExportDelta = async (tier: 'tier1' | 'tier2' | 'tier3') => {
     if (!jobId || !analytics?.delta_analysis) return;
-    
+
     try {
-      // Create CSV from delta analysis for the specified tier
       const deltaData = analytics.delta_analysis;
-      const tierRemoved = deltaData.filter((item: any) => 
-        item.PROCESSING_STATUS === 'Removed' && 
+      const tierRemoved = deltaData.filter((item: any) =>
+        item.PROCESSING_STATUS === 'Removed' &&
         (tier === 'tier1' ? item.TIER === 'Tier 1' : tier === 'tier2' ? item.TIER === 'Tier 2' : item.TIER === 'Tier 3')
       );
-      
+
       if (tierRemoved.length === 0) {
         alert(`No removed contacts found for ${tier.toUpperCase()}`);
         return;
       }
-      
-      // Convert to CSV
+
       const headers = Object.keys(tierRemoved[0]);
       const csvRows = [
         headers.join(','),
-        ...tierRemoved.map((row: any) => 
+        ...tierRemoved.map((row: any) =>
           headers.map(header => {
             const value = row[header] || '';
-            // Escape commas and quotes in CSV
             if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
               return `"${value.replace(/"/g, '""')}"`;
             }
@@ -137,7 +142,7 @@ export default function AnalyticsPage() {
           }).join(',')
         )
       ];
-      
+
       const csvContent = csvRows.join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
@@ -151,7 +156,6 @@ export default function AnalyticsPage() {
       document.body.removeChild(a);
     } catch (err) {
       alert(`Failed to export ${tier} delta list`);
-      // Error logged to console for debugging in development
       if (import.meta.env.DEV) {
         console.error('Export error:', err);
       }
@@ -159,66 +163,59 @@ export default function AnalyticsPage() {
   };
 
   if (loading) {
-    return <div className="analytics-page">Loading...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   if (error || !job) {
     return (
-      <div className="analytics-page">
-        <p>{error || 'Job not found'}</p>
-        <button onClick={() => navigate('/')}>Back to Process</button>
+      <div className="space-y-4">
+        <p className="text-destructive">{error || 'Job not found'}</p>
+        <Button onClick={() => navigate('/')}>Back to Process</Button>
       </div>
     );
   }
 
   const analytics = job.analytics;
   const summary = analytics?.processing_summary;
-  
-  // Get user prefix from job settings for export filenames
-  const getUserPrefix = (): string => {
-    const prefix = job?.settings?.userPrefix || 'Combined-Contacts';
-    // Sanitize prefix for filename (remove invalid characters)
-    return prefix.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
-  };
-  
-  // Get removed contacts count for each tier from delta analysis
+
   const getRemovedCount = (tier: string) => {
     if (!analytics?.delta_analysis || !Array.isArray(analytics.delta_analysis)) return 0;
-    return analytics.delta_analysis.filter((item: any) => 
+    return analytics.delta_analysis.filter((item: any) =>
       item.PROCESSING_STATUS === 'Removed' && item.TIER === tier
     ).length;
   };
 
-  // Get all removed contacts
   const getAllRemovedContacts = () => {
     if (!analytics?.delta_analysis || !Array.isArray(analytics.delta_analysis)) return [];
-    return analytics.delta_analysis.filter((item: any) => 
+    return analytics.delta_analysis.filter((item: any) =>
       item.PROCESSING_STATUS === 'Removed'
     );
   };
 
-  // Get top removal reasons
   const getTopRemovalReasons = (limit: number = 10) => {
     const removed = getAllRemovedContacts();
     if (removed.length === 0) return [];
-    
+
     const reasonCounts: Record<string, number> = {};
     removed.forEach((item: any) => {
       const reason = item.FILTER_REASON || 'Unknown reason';
       reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
     });
-    
+
     return Object.entries(reasonCounts)
       .map(([reason, count]) => ({ reason, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, limit);
   };
 
-  // Get per-tier breakdown
   const getTierBreakdown = () => {
     const removed = getAllRemovedContacts();
     if (removed.length === 0) return { tier1: 0, tier2: 0, tier3: 0 };
-    
+
     return {
       tier1: removed.filter((item: any) => item.TIER === 'Tier 1').length,
       tier2: removed.filter((item: any) => item.TIER === 'Tier 2').length,
@@ -228,23 +225,21 @@ export default function AnalyticsPage() {
 
   const handleExportAllRemoved = async () => {
     if (!jobId || !analytics?.delta_analysis) return;
-    
+
     try {
       const allRemoved = getAllRemovedContacts();
-      
+
       if (allRemoved.length === 0) {
         alert('No removed contacts found');
         return;
       }
-      
-      // Convert to CSV
+
       const headers = Object.keys(allRemoved[0]);
       const csvRows = [
         headers.join(','),
-        ...allRemoved.map((row: any) => 
+        ...allRemoved.map((row: any) =>
           headers.map(header => {
             const value = row[header] || '';
-            // Escape commas and quotes in CSV
             if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
               return `"${value.replace(/"/g, '""')}"`;
             }
@@ -252,7 +247,7 @@ export default function AnalyticsPage() {
           }).join(',')
         )
       ];
-      
+
       const csvContent = csvRows.join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
@@ -266,7 +261,6 @@ export default function AnalyticsPage() {
       document.body.removeChild(a);
     } catch (err) {
       alert('Failed to export all removed contacts');
-      // Error logged to console for debugging in development
       if (import.meta.env.DEV) {
         console.error('Export error:', err);
       }
@@ -280,7 +274,6 @@ export default function AnalyticsPage() {
       const csvContent = [
         'Firm Name',
         ...analytics.excluded_firms_list.map((firm: string) => {
-          // Escape commas and quotes in CSV
           if (firm.includes(',') || firm.includes('"')) {
             return `"${firm.replace(/"/g, '""')}"`;
           }
@@ -300,7 +293,6 @@ export default function AnalyticsPage() {
       document.body.removeChild(a);
     } catch (err) {
       alert('Failed to export excluded firms');
-      // Error logged to console for debugging in development
       if (import.meta.env.DEV) {
         console.error('Export error:', err);
       }
@@ -318,7 +310,6 @@ export default function AnalyticsPage() {
       setPresetSaveMessage({ type: 'success', text: `Preset "${presetName.trim()}" saved successfully!` });
       setPresetName('');
       setShowPresetModal(false);
-      // Clear success message after 3 seconds
       setTimeout(() => setPresetSaveMessage(null), 3000);
     } catch (err) {
       setPresetSaveMessage({ type: 'error', text: 'Failed to save preset. Please try again.' });
@@ -331,502 +322,372 @@ export default function AnalyticsPage() {
   };
 
   return (
-    <div className="analytics-page">
-      <div className="analytics-header">
-        <button className="back-button" onClick={() => navigate('/history')}>
-          ← Back to History
-        </button>
-        <h1>Analytics</h1>
-        <div className="header-actions">
-          {job.status === 'completed' && (
-            <>
-              <button className="save-preset-button" onClick={() => setShowPresetModal(true)}>
-                Save as Preset
-              </button>
-              {/* Premier download button (when separate file exists) */}
-              {analytics?.premier_file && (
-                <button
-                  className="download-button premier-download"
-                  onClick={() => handleDownloadIndividualFile(analytics.premier_file!)}
-                >
-                  Download Premier
-                </button>
-              )}
-              <button className="download-button" onClick={handleDownload}>
-                {(analytics?.is_separated_by_firm_type || job.settings?.separateByFirmType) ? 'Download All (ZIP)' : 'Download Excel'}
-              </button>
-            </>
-          )}
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="sm" onClick={() => navigate('/history')}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <h1 className="text-2xl font-bold">Analytics</h1>
         </div>
+        {job.status === 'completed' && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setShowPresetModal(true)}>
+              <Save className="h-4 w-4 mr-2" />
+              Save as Preset
+            </Button>
+            {analytics?.premier_file && (
+              <Button
+                variant="outline"
+                onClick={() => handleDownloadIndividualFile(analytics.premier_file!)}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download Premier
+              </Button>
+            )}
+            <Button onClick={handleDownload}>
+              <Download className="h-4 w-4 mr-2" />
+              {(analytics?.is_separated_by_firm_type || job.settings?.separateByFirmType) ? 'Download All (ZIP)' : 'Download Excel'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Preset Save Modal */}
-      {showPresetModal && (
-        <div className="modal-overlay" onClick={() => setShowPresetModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3>Save Filter as Preset</h3>
-            <p>Save the current filter configuration as a reusable preset.</p>
-            <input
-              type="text"
-              className="preset-name-input"
-              placeholder="Enter preset name"
-              value={presetName}
-              onChange={(e) => setPresetName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && presetName.trim()) {
-                  handleSaveAsPreset();
-                }
-              }}
-              autoFocus
-            />
-            <div className="modal-actions">
-              <button
-                className="cancel-button"
-                onClick={() => {
-                  setShowPresetModal(false);
-                  setPresetName('');
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="save-button"
-                onClick={handleSaveAsPreset}
-                disabled={!presetName.trim() || savingPreset}
-              >
-                {savingPreset ? 'Saving...' : 'Save Preset'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog open={showPresetModal} onOpenChange={setShowPresetModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Filter as Preset</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Save the current filter configuration as a reusable preset.
+          </p>
+          <Input
+            placeholder="Enter preset name"
+            value={presetName}
+            onChange={(e) => setPresetName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && presetName.trim()) {
+                handleSaveAsPreset();
+              }
+            }}
+            autoFocus
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowPresetModal(false); setPresetName(''); }}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveAsPreset} disabled={!presetName.trim() || savingPreset}>
+              {savingPreset ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                'Save Preset'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Preset Save Message */}
       {presetSaveMessage && (
-        <div className={`preset-message ${presetSaveMessage.type}`}>
+        <div className={cn(
+          'p-3 rounded-md text-sm',
+          presetSaveMessage.type === 'success' ? 'bg-green-500/10 text-green-600' : 'bg-destructive/10 text-destructive'
+        )}>
           {presetSaveMessage.text}
         </div>
       )}
 
       {summary && (
-        <div className="analytics-content">
+        <div className="space-y-6">
           {/* Pipeline Flow Visualization */}
           {analytics?.pipeline_flow && (
-            <section className="details-section pipeline-flow-section">
-              <h2>Processing Pipeline</h2>
-              <p className="section-description">
+            <Card className="p-6">
+              <h2 className="text-lg font-semibold mb-2">Processing Pipeline</h2>
+              <p className="text-sm text-muted-foreground mb-4">
                 Visual representation of contacts flowing through each processing stage.
               </p>
-              <div className="pipeline-flow">
-                {/* Input Stage */}
-                <div className="pipeline-stage">
-                  <div className="stage-box stage-input">
-                    <div className="stage-label">Input</div>
-                    <div className="stage-value">{analytics.pipeline_flow.input_raw.toLocaleString()}</div>
-                  </div>
-                  <div className="stage-arrow">→</div>
+              <div className="flex flex-wrap items-center gap-2 overflow-x-auto">
+                <div className="flex flex-col items-center p-3 rounded-lg bg-muted min-w-[100px]">
+                  <span className="text-xs text-muted-foreground">Input</span>
+                  <span className="text-lg font-bold">{analytics.pipeline_flow.input_raw.toLocaleString()}</span>
                 </div>
-
-                {/* Deduplication Stage */}
-                <div className="pipeline-stage">
-                  <div className="stage-box stage-dedup">
-                    <div className="stage-label">Deduplication</div>
-                    <div className="stage-value">{analytics.pipeline_flow.after_dedup.toLocaleString()}</div>
-                    <div className="stage-delta negative">
-                      -{(analytics.pipeline_flow.input_raw - analytics.pipeline_flow.after_dedup).toLocaleString()}
+                <span className="text-muted-foreground">→</span>
+                <div className="flex flex-col items-center p-3 rounded-lg bg-blue-500/10 min-w-[100px]">
+                  <span className="text-xs text-muted-foreground">Dedup</span>
+                  <span className="text-lg font-bold">{analytics.pipeline_flow.after_dedup.toLocaleString()}</span>
+                  <Badge variant="secondary" className="text-xs mt-1">
+                    -{(analytics.pipeline_flow.input_raw - analytics.pipeline_flow.after_dedup).toLocaleString()}
+                  </Badge>
+                </div>
+                <span className="text-muted-foreground">→</span>
+                <div className="flex flex-col items-center p-3 rounded-lg bg-orange-500/10 min-w-[100px]">
+                  <span className="text-xs text-muted-foreground">Removals</span>
+                  <span className="text-lg font-bold">{analytics.pipeline_flow.after_removals.toLocaleString()}</span>
+                  {analytics.pipeline_flow.after_dedup - analytics.pipeline_flow.after_removals > 0 && (
+                    <Badge variant="secondary" className="text-xs mt-1">
+                      -{(analytics.pipeline_flow.after_dedup - analytics.pipeline_flow.after_removals).toLocaleString()}
+                    </Badge>
+                  )}
+                </div>
+                {analytics.pipeline_flow.premier_extracted !== null && analytics.pipeline_flow.premier_extracted > 0 && (
+                  <>
+                    <span className="text-muted-foreground">→</span>
+                    <div className="flex flex-col items-center p-3 rounded-lg bg-purple-500/10 min-w-[100px]">
+                      <span className="text-xs text-muted-foreground">Top 25</span>
+                      <span className="text-lg font-bold">{analytics.pipeline_flow.after_premier?.toLocaleString() ?? '-'}</span>
+                      <Badge className="bg-purple-500 text-xs mt-1">
+                        Premier: {analytics.pipeline_flow.premier_extracted.toLocaleString()}
+                      </Badge>
                     </div>
-                  </div>
-                  <div className="stage-arrow">→</div>
-                </div>
-
-                {/* Removals Stage */}
-                <div className="pipeline-stage">
-                  <div className="stage-box stage-removals">
-                    <div className="stage-label">Removal Lists</div>
-                    <div className="stage-value">{analytics.pipeline_flow.after_removals.toLocaleString()}</div>
-                    {analytics.pipeline_flow.after_dedup - analytics.pipeline_flow.after_removals > 0 && (
-                      <div className="stage-delta negative">
-                        -{(analytics.pipeline_flow.after_dedup - analytics.pipeline_flow.after_removals).toLocaleString()}
-                      </div>
+                  </>
+                )}
+                <span className="text-muted-foreground">→</span>
+                <div className="flex flex-col items-center p-3 rounded-lg bg-green-500/10 min-w-[100px]">
+                  <span className="text-xs text-muted-foreground">Tiers</span>
+                  <span className="text-lg font-bold">
+                    {(analytics.pipeline_flow.tier1_output + analytics.pipeline_flow.tier2_output + analytics.pipeline_flow.tier3_output).toLocaleString()}
+                  </span>
+                  <div className="flex gap-1 mt-1 text-xs">
+                    <Badge variant="outline">T1: {analytics.pipeline_flow.tier1_output.toLocaleString()}</Badge>
+                    <Badge variant="outline">T2: {analytics.pipeline_flow.tier2_output.toLocaleString()}</Badge>
+                    {analytics.pipeline_flow.tier3_output > 0 && (
+                      <Badge variant="outline">T3: {analytics.pipeline_flow.tier3_output.toLocaleString()}</Badge>
                     )}
                   </div>
-                  <div className="stage-arrow">→</div>
                 </div>
-
-                {/* Premier Stage (conditional) */}
-                {analytics.pipeline_flow.premier_extracted !== null && analytics.pipeline_flow.premier_extracted > 0 && (
-                  <div className="pipeline-stage">
-                    <div className="stage-box stage-premier">
-                      <div className="stage-label">Top 25 List</div>
-                      <div className="stage-value">{analytics.pipeline_flow.after_premier?.toLocaleString() ?? '-'}</div>
-                      <div className="stage-delta premier">
-                        Premier: {analytics.pipeline_flow.premier_extracted.toLocaleString()}
-                      </div>
-                    </div>
-                    <div className="stage-arrow">→</div>
-                  </div>
-                )}
-
-                {/* Tier Filtering Stage */}
-                <div className="pipeline-stage">
-                  <div className="stage-box stage-tiers">
-                    <div className="stage-label">Tiered Filtering</div>
-                    <div className="stage-value">
-                      {(analytics.pipeline_flow.tier1_output + analytics.pipeline_flow.tier2_output + analytics.pipeline_flow.tier3_output).toLocaleString()}
-                    </div>
-                    <div className="stage-tiers-breakdown">
-                      <span>T1: {analytics.pipeline_flow.tier1_output.toLocaleString()}</span>
-                      <span>T2: {analytics.pipeline_flow.tier2_output.toLocaleString()}</span>
-                      {analytics.pipeline_flow.tier3_output > 0 && (
-                        <span>T3: {analytics.pipeline_flow.tier3_output.toLocaleString()}</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="stage-arrow">→</div>
-                </div>
-
-                {/* Output Stage */}
-                <div className="pipeline-stage">
-                  <div className="stage-box stage-output">
-                    <div className="stage-label">Output</div>
-                    <div className="stage-value">{analytics.pipeline_flow.total_output.toLocaleString()}</div>
-                  </div>
+                <span className="text-muted-foreground">→</span>
+                <div className="flex flex-col items-center p-3 rounded-lg bg-green-500/20 border border-green-500/50 min-w-[100px]">
+                  <span className="text-xs text-muted-foreground">Output</span>
+                  <span className="text-lg font-bold text-green-600">{analytics.pipeline_flow.total_output.toLocaleString()}</span>
                 </div>
               </div>
-            </section>
+            </Card>
           )}
 
-          <section className="summary-section">
-            <h2>Processing Summary</h2>
-            <div className="summary-grid">
-              <div className="summary-card">
-                <div className="summary-label">Input Files</div>
-                <div className="summary-value">{summary.input_files_count}</div>
+          {/* Processing Summary */}
+          <Card className="p-6">
+            <h2 className="text-lg font-semibold mb-4">Processing Summary</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="p-4 rounded-lg bg-muted">
+                <p className="text-sm text-muted-foreground">Input Files</p>
+                <p className="text-2xl font-bold">{summary.input_files_count}</p>
               </div>
-              <div className="summary-card">
-                <div className="summary-label">Total Raw Contacts</div>
-                <div className="summary-value">{summary.total_raw_contacts.toLocaleString()}</div>
+              <div className="p-4 rounded-lg bg-muted">
+                <p className="text-sm text-muted-foreground">Total Raw Contacts</p>
+                <p className="text-2xl font-bold">{summary.total_raw_contacts.toLocaleString()}</p>
               </div>
-              <div className="summary-card">
-                <div className="summary-label">Unique Contacts</div>
-                <div className="summary-value">{summary.unique_contacts_after_dedup.toLocaleString()}</div>
+              <div className="p-4 rounded-lg bg-muted">
+                <p className="text-sm text-muted-foreground">Unique Contacts</p>
+                <p className="text-2xl font-bold">{summary.unique_contacts_after_dedup.toLocaleString()}</p>
               </div>
-              <div className="summary-card">
-                <div className="summary-label">Tier 1 Contacts</div>
-                <div className="summary-value">{summary.tier1_contacts.toLocaleString()}</div>
+              <div className="p-4 rounded-lg bg-muted">
+                <p className="text-sm text-muted-foreground">Total Filtered</p>
+                <p className="text-2xl font-bold">{summary.total_filtered_contacts.toLocaleString()}</p>
               </div>
-              <div className="summary-card">
-                <div className="summary-label">Tier 2 Contacts</div>
-                <div className="summary-value">{summary.tier2_contacts.toLocaleString()}</div>
+              <div className="p-4 rounded-lg bg-muted">
+                <p className="text-sm text-muted-foreground">Tier 1 Contacts</p>
+                <p className="text-2xl font-bold">{summary.tier1_contacts.toLocaleString()}</p>
+              </div>
+              <div className="p-4 rounded-lg bg-muted">
+                <p className="text-sm text-muted-foreground">Tier 2 Contacts</p>
+                <p className="text-2xl font-bold">{summary.tier2_contacts.toLocaleString()}</p>
               </div>
               {summary.tier3_contacts > 0 && (
-                <div className="summary-card">
-                  <div className="summary-label">Tier 3 Contacts</div>
-                  <div className="summary-value">{summary.tier3_contacts.toLocaleString()}</div>
+                <div className="p-4 rounded-lg bg-muted">
+                  <p className="text-sm text-muted-foreground">Tier 3 Contacts</p>
+                  <p className="text-2xl font-bold">{summary.tier3_contacts.toLocaleString()}</p>
                 </div>
               )}
-              <div className="summary-card">
-                <div className="summary-label">Total Filtered</div>
-                <div className="summary-value">{summary.total_filtered_contacts.toLocaleString()}</div>
+              <div className="p-4 rounded-lg bg-muted">
+                <p className="text-sm text-muted-foreground">Retention Rate</p>
+                <p className="text-2xl font-bold">{summary.retention_rate.toFixed(1)}%</p>
               </div>
-              <div className="summary-card">
-                <div className="summary-label">Retention Rate</div>
-                <div className="summary-value">{summary.retention_rate.toFixed(1)}%</div>
-              </div>
-              {(() => {
-                const breakdown = getTierBreakdown();
-                const totalRemoved = breakdown.tier1 + breakdown.tier2 + breakdown.tier3;
-                if (totalRemoved > 0) {
-                  return (
-                    <>
-                      <div className="summary-card">
-                        <div className="summary-label">Tier 1 Removed</div>
-                        <div className="summary-value">{breakdown.tier1.toLocaleString()}</div>
-                      </div>
-                      <div className="summary-card">
-                        <div className="summary-label">Tier 2 Removed</div>
-                        <div className="summary-value">{breakdown.tier2.toLocaleString()}</div>
-                      </div>
-                      {breakdown.tier3 > 0 && (
-                        <div className="summary-card">
-                          <div className="summary-label">Tier 3 Removed</div>
-                          <div className="summary-value">{breakdown.tier3.toLocaleString()}</div>
-                        </div>
-                      )}
-                      <div className="summary-card">
-                        <div className="summary-label">Total Removed</div>
-                        <div className="summary-value">{totalRemoved.toLocaleString()}</div>
-                      </div>
-                    </>
-                  );
-                }
-                return null;
-              })()}
-              {analytics?.excluded_firms_list && analytics.excluded_firms_list.length > 0 && (
-                <div className="summary-card">
-                  <div className="summary-label">Firms Removed</div>
-                  <div className="summary-value">{analytics.excluded_firms_list.length.toLocaleString()}</div>
-                </div>
-              )}
             </div>
-          </section>
+          </Card>
 
-          {/* Removal List Stats Section */}
+          {/* Removal List Stats */}
           {analytics?.removal_list_stats && analytics.removal_list_stats.total_removed > 0 && (
-            <section className="details-section">
-              <h2>Removal List Summary</h2>
-              <p className="section-description">
-                Contacts removed by uploaded removal lists.
-              </p>
-              <div className="summary-grid">
+            <Card className="p-6">
+              <h2 className="text-lg font-semibold mb-4">Removal List Summary</h2>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {analytics.removal_list_stats.account_removal.applied && (
                   <>
-                    <div className="summary-card">
-                      <div className="summary-label">Account Removal List</div>
-                      <div className="summary-value" style={{ fontSize: '0.9rem' }}>
+                    <div className="p-4 rounded-lg bg-muted">
+                      <p className="text-sm text-muted-foreground">Account List</p>
+                      <p className="text-sm font-medium truncate">
                         {analytics.removal_list_stats.account_removal.list_name || 'Uploaded list'}
-                      </div>
+                      </p>
                     </div>
-                    <div className="summary-card">
-                      <div className="summary-label">Accounts in List</div>
-                      <div className="summary-value">
-                        {analytics.removal_list_stats.account_removal.list_size?.toLocaleString() || 0}
-                      </div>
-                    </div>
-                    <div className="summary-card">
-                      <div className="summary-label">Accounts Matched</div>
-                      <div className="summary-value">
+                    <div className="p-4 rounded-lg bg-muted">
+                      <p className="text-sm text-muted-foreground">Accounts Matched</p>
+                      <p className="text-2xl font-bold">
                         {analytics.removal_list_stats.account_removal.accounts_matched?.toLocaleString() || 0}
-                      </div>
-                    </div>
-                    <div className="summary-card">
-                      <div className="summary-label">Contacts Removed (Accounts)</div>
-                      <div className="summary-value">
-                        {analytics.removal_list_stats.account_removal.contacts_removed?.toLocaleString() || 0}
-                      </div>
+                      </p>
                     </div>
                   </>
                 )}
                 {analytics.removal_list_stats.contact_removal.applied && (
                   <>
-                    <div className="summary-card">
-                      <div className="summary-label">Contact Removal List</div>
-                      <div className="summary-value" style={{ fontSize: '0.9rem' }}>
+                    <div className="p-4 rounded-lg bg-muted">
+                      <p className="text-sm text-muted-foreground">Contact List</p>
+                      <p className="text-sm font-medium truncate">
                         {analytics.removal_list_stats.contact_removal.list_name || 'Uploaded list'}
-                      </div>
+                      </p>
                     </div>
-                    <div className="summary-card">
-                      <div className="summary-label">Contacts in List</div>
-                      <div className="summary-value">
-                        {analytics.removal_list_stats.contact_removal.list_size?.toLocaleString() || 0}
-                      </div>
-                    </div>
-                    <div className="summary-card">
-                      <div className="summary-label">Email Matches</div>
-                      <div className="summary-value">
+                    <div className="p-4 rounded-lg bg-muted">
+                      <p className="text-sm text-muted-foreground">Email Matches</p>
+                      <p className="text-2xl font-bold">
                         {analytics.removal_list_stats.contact_removal.email_matches?.toLocaleString() || 0}
-                      </div>
-                    </div>
-                    <div className="summary-card">
-                      <div className="summary-label">Name+Account Matches</div>
-                      <div className="summary-value">
-                        {analytics.removal_list_stats.contact_removal.name_account_matches?.toLocaleString() || 0}
-                      </div>
+                      </p>
                     </div>
                   </>
                 )}
-                <div className="summary-card" style={{ backgroundColor: 'var(--color-surface)' }}>
-                  <div className="summary-label">Total Removed by Lists</div>
-                  <div className="summary-value" style={{ color: 'var(--color-error)' }}>
+                <div className="p-4 rounded-lg bg-destructive/10">
+                  <p className="text-sm text-muted-foreground">Total Removed by Lists</p>
+                  <p className="text-2xl font-bold text-destructive">
                     {analytics.removal_list_stats.total_removed?.toLocaleString() || 0}
-                  </div>
+                  </p>
                 </div>
               </div>
-            </section>
+            </Card>
           )}
 
-          {/* Firm Type Breakdown Section - for separated firm type jobs */}
+          {/* Firm Type Breakdown */}
           {(analytics?.is_separated_by_firm_type || job.settings?.separateByFirmType) && (
-            <section className="details-section firm-type-section">
-              <h2>Output Files by Firm Type</h2>
+            <Card className="p-6">
+              <h2 className="text-lg font-semibold mb-2">Output Files by Firm Type</h2>
               {analytics?.firm_type_breakdown && analytics.firm_type_breakdown.length > 0 ? (
                 <>
-                  <p className="section-description">
+                  <p className="text-sm text-muted-foreground mb-4">
                     Your results have been separated into {analytics.firm_type_breakdown.length} files by firm type.
-                    Click a card to view details, or download individual files.
                   </p>
-                  <div className="firm-type-grid">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {analytics.firm_type_breakdown.map((entry: FirmTypeBreakdownEntry) => {
                       const fileEntry = analytics.files_in_zip?.find(
                         (f: FileInZipEntry) => f.firmTypeGroup === entry.firmTypeGroup
                       );
                       const isExpanded = expandedFirmType === entry.firmTypeGroup;
-                      const percentOfTotal = summary ? ((entry.totalContacts / summary.total_filtered_contacts) * 100).toFixed(1) : '0';
 
                       return (
-                        <div
+                        <Card
                           key={entry.firmTypeGroup}
-                          className={`firm-type-card ${isExpanded ? 'expanded' : ''}`}
+                          className={cn(
+                            'p-4 cursor-pointer transition-colors hover:bg-muted/50',
+                            isExpanded && 'ring-2 ring-primary'
+                          )}
                           onClick={() => setExpandedFirmType(isExpanded ? null : entry.firmTypeGroup)}
                         >
-                          <div className="firm-type-header">
-                            <div className="firm-type-name">{entry.displayName}</div>
-                            <div className="firm-type-total">{entry.totalContacts.toLocaleString()} contacts</div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium">{entry.displayName}</span>
+                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                           </div>
-                          <div className="firm-type-breakdown">
-                            <div className="tier-count">
-                              <span className="tier-label">Tier 1:</span>
-                              <span className="tier-value">{entry.tier1Contacts.toLocaleString()}</span>
-                            </div>
-                            <div className="tier-count">
-                              <span className="tier-label">Tier 2:</span>
-                              <span className="tier-value">{entry.tier2Contacts.toLocaleString()}</span>
-                            </div>
+                          <p className="text-2xl font-bold mb-2">{entry.totalContacts.toLocaleString()}</p>
+                          <div className="flex gap-2 text-xs">
+                            <Badge variant="outline">T1: {entry.tier1Contacts.toLocaleString()}</Badge>
+                            <Badge variant="outline">T2: {entry.tier2Contacts.toLocaleString()}</Badge>
                             {entry.tier3Contacts > 0 && (
-                              <div className="tier-count">
-                                <span className="tier-label">Tier 3:</span>
-                                <span className="tier-value">{entry.tier3Contacts.toLocaleString()}</span>
-                              </div>
+                              <Badge variant="outline">T3: {entry.tier3Contacts.toLocaleString()}</Badge>
                             )}
                           </div>
-
-                          {/* Expanded details */}
-                          {isExpanded && (
-                            <div className="firm-type-details" onClick={(e) => e.stopPropagation()}>
-                              <div className="detail-row">
-                                <span className="detail-label">% of Total Output:</span>
-                                <span className="detail-value">{percentOfTotal}%</span>
-                              </div>
-                              <div className="detail-row">
-                                <span className="detail-label">Tier 1 Distribution:</span>
-                                <span className="detail-value">
-                                  {entry.totalContacts > 0 ? ((entry.tier1Contacts / entry.totalContacts) * 100).toFixed(1) : 0}%
-                                </span>
-                              </div>
-                              <div className="detail-row">
-                                <span className="detail-label">Tier 2 Distribution:</span>
-                                <span className="detail-value">
-                                  {entry.totalContacts > 0 ? ((entry.tier2Contacts / entry.totalContacts) * 100).toFixed(1) : 0}%
-                                </span>
-                              </div>
-                              {entry.tier3Contacts > 0 && (
-                                <div className="detail-row">
-                                  <span className="detail-label">Tier 3 Distribution:</span>
-                                  <span className="detail-value">
-                                    {entry.totalContacts > 0 ? ((entry.tier3Contacts / entry.totalContacts) * 100).toFixed(1) : 0}%
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {fileEntry && (
-                            <button
-                              className="download-file-button"
+                          {isExpanded && fileEntry && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full mt-4"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDownloadIndividualFile(fileEntry.filename);
                               }}
                             >
+                              <Download className="h-4 w-4 mr-2" />
                               Download {entry.displayName}
-                            </button>
+                            </Button>
                           )}
-
-                          <div className="expand-indicator">
-                            {isExpanded ? 'Click to collapse' : 'Click for details'}
-                          </div>
-                        </div>
+                        </Card>
                       );
                     })}
                   </div>
                 </>
               ) : (
-                <div className="firm-type-empty">
-                  <p className="section-description">
-                    Separate by Firm Type was enabled, but no contacts passed the filters.
-                    The output ZIP file contains empty sheets for each firm type group.
-                  </p>
-                  <p className="section-description">
-                    Click "Download All (ZIP)" to download the file structure.
-                  </p>
-                </div>
+                <p className="text-sm text-muted-foreground">
+                  Separate by Firm Type was enabled, but no contacts passed the filters.
+                </p>
               )}
-            </section>
+            </Card>
           )}
 
+          {/* Input File Details */}
           {analytics?.input_file_details && analytics.input_file_details.length > 0 && (
-            <section className="details-section">
-              <h2>Input File Details</h2>
-              <table className="details-table">
-                <thead>
-                  <tr>
-                    <th>File Name</th>
-                    <th>Contacts</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <Card className="p-6">
+              <h2 className="text-lg font-semibold mb-4">Input File Details</h2>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>File Name</TableHead>
+                    <TableHead className="text-right">Contacts</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {analytics.input_file_details.map((file, index) => {
-                    // Extract filename from path if needed
                     let fileName = file.file.includes('/') || file.file.includes('\\')
                       ? file.file.split(/[/\\]/).pop() || file.file
                       : file.file;
-                    
-                    // Check if it's a UUID filename - if so, try to get original name from job input_files
+
                     const isUuid = fileName.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\./i);
                     if (isUuid && job?.input_files && job.input_files.length > index) {
-                      // Use the original filename from job input_files
                       fileName = job.input_files[index];
                     }
-                    
-                    // Extract just the filename if it's still a path
+
                     const displayName = fileName.includes('/') || fileName.includes('\\')
                       ? fileName.split(/[/\\]/).pop() || fileName
                       : fileName;
-                    
+
                     return (
-                      <tr key={index}>
-                        <td>{displayName}</td>
-                        <td>{file.contacts.toLocaleString()}</td>
-                      </tr>
+                      <TableRow key={index}>
+                        <TableCell className="font-medium">{displayName}</TableCell>
+                        <TableCell className="text-right">{file.contacts.toLocaleString()}</TableCell>
+                      </TableRow>
                     );
                   })}
-                </tbody>
-              </table>
-            </section>
+                </TableBody>
+              </Table>
+            </Card>
           )}
 
+          {/* Delta Analysis / Removed Contacts */}
           {analytics?.delta_analysis && Array.isArray(analytics.delta_analysis) && analytics.delta_analysis.length > 0 && (
-            <section className="details-section">
-              <h2>Removed Contacts by Tier</h2>
-              <p className="section-description">
-                Statistics and export options for contacts removed during filtering.
-              </p>
-              
-              {/* Per Tier Breakdown */}
+            <Card className="p-6">
+              <h2 className="text-lg font-semibold mb-4">Removed Contacts by Tier</h2>
+
               {(() => {
                 const breakdown = getTierBreakdown();
                 const totalRemoved = breakdown.tier1 + breakdown.tier2 + breakdown.tier3;
                 if (totalRemoved === 0) return null;
-                
+
                 return (
-                  <div className="summary-grid" style={{ marginBottom: '2rem' }}>
-                    <div className="summary-card">
-                      <div className="summary-label">Tier 1 Removed</div>
-                      <div className="summary-value">{breakdown.tier1.toLocaleString()}</div>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+                    <div className="p-4 rounded-lg bg-muted">
+                      <p className="text-sm text-muted-foreground">Tier 1 Removed</p>
+                      <p className="text-2xl font-bold">{breakdown.tier1.toLocaleString()}</p>
                     </div>
-                    <div className="summary-card">
-                      <div className="summary-label">Tier 2 Removed</div>
-                      <div className="summary-value">{breakdown.tier2.toLocaleString()}</div>
+                    <div className="p-4 rounded-lg bg-muted">
+                      <p className="text-sm text-muted-foreground">Tier 2 Removed</p>
+                      <p className="text-2xl font-bold">{breakdown.tier2.toLocaleString()}</p>
                     </div>
                     {breakdown.tier3 > 0 && (
-                      <div className="summary-card">
-                        <div className="summary-label">Tier 3 Removed</div>
-                        <div className="summary-value">{breakdown.tier3.toLocaleString()}</div>
+                      <div className="p-4 rounded-lg bg-muted">
+                        <p className="text-sm text-muted-foreground">Tier 3 Removed</p>
+                        <p className="text-2xl font-bold">{breakdown.tier3.toLocaleString()}</p>
                       </div>
                     )}
-                    <div className="summary-card">
-                      <div className="summary-label">Total Removed</div>
-                      <div className="summary-value">{totalRemoved.toLocaleString()}</div>
+                    <div className="p-4 rounded-lg bg-destructive/10">
+                      <p className="text-sm text-muted-foreground">Total Removed</p>
+                      <p className="text-2xl font-bold text-destructive">{totalRemoved.toLocaleString()}</p>
                     </div>
                   </div>
                 );
@@ -836,116 +697,99 @@ export default function AnalyticsPage() {
               {(() => {
                 const topReasons = getTopRemovalReasons(10);
                 if (topReasons.length === 0) return null;
-                
+
                 return (
-                  <div style={{ marginBottom: '2rem' }}>
-                    <h3 style={{ marginBottom: '1rem', fontSize: '1.1rem', fontWeight: '600' }}>Top Removal Reasons</h3>
-                    <table className="details-table">
-                      <thead>
-                        <tr>
-                          <th>Reason</th>
-                          <th>Count</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                  <div className="mb-6">
+                    <h3 className="font-medium mb-3">Top Removal Reasons</h3>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Reason</TableHead>
+                          <TableHead className="text-right">Count</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {topReasons.map((item, index) => (
-                          <tr key={index}>
-                            <td>{item.reason}</td>
-                            <td>{item.count.toLocaleString()}</td>
-                          </tr>
+                          <TableRow key={index}>
+                            <TableCell>{item.reason}</TableCell>
+                            <TableCell className="text-right">{item.count.toLocaleString()}</TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </TableBody>
+                    </Table>
                   </div>
                 );
               })()}
 
               {/* Export Buttons */}
-              <div className="export-buttons">
+              <div className="space-y-3">
                 {getAllRemovedContacts().length > 0 && (
-                  <button
-                    className="export-button"
-                    onClick={handleExportAllRemoved}
-                    style={{ marginBottom: '1rem', width: '100%' }}
-                  >
+                  <Button variant="outline" className="w-full" onClick={handleExportAllRemoved}>
+                    <Download className="h-4 w-4 mr-2" />
                     Export All Removed Contacts ({getAllRemovedContacts().length.toLocaleString()})
-                  </button>
+                  </Button>
                 )}
-                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                <div className="flex flex-wrap gap-2">
                   {getRemovedCount('Tier 1') > 0 && (
-                    <button
-                      className="export-button"
-                      onClick={() => handleExportDelta('tier1')}
-                    >
-                      Export Tier 1 Removed ({getRemovedCount('Tier 1')})
-                    </button>
+                    <Button variant="outline" size="sm" onClick={() => handleExportDelta('tier1')}>
+                      Export T1 Removed ({getRemovedCount('Tier 1')})
+                    </Button>
                   )}
                   {getRemovedCount('Tier 2') > 0 && (
-                    <button
-                      className="export-button"
-                      onClick={() => handleExportDelta('tier2')}
-                    >
-                      Export Tier 2 Removed ({getRemovedCount('Tier 2')})
-                    </button>
+                    <Button variant="outline" size="sm" onClick={() => handleExportDelta('tier2')}>
+                      Export T2 Removed ({getRemovedCount('Tier 2')})
+                    </Button>
                   )}
                   {getRemovedCount('Tier 3') > 0 && (
-                    <button
-                      className="export-button"
-                      onClick={() => handleExportDelta('tier3')}
-                    >
-                      Export Tier 3 Removed ({getRemovedCount('Tier 3')})
-                    </button>
+                    <Button variant="outline" size="sm" onClick={() => handleExportDelta('tier3')}>
+                      Export T3 Removed ({getRemovedCount('Tier 3')})
+                    </Button>
                   )}
                 </div>
               </div>
-            </section>
+            </Card>
           )}
 
+          {/* Excluded Firms Summary */}
           {analytics?.excluded_firms_summary && (
-            <section className="details-section">
-              <h2>Excluded Firms Summary</h2>
-              <div className="summary-grid">
-                <div className="summary-card">
-                  <div className="summary-label">Total Firms</div>
-                  <div className="summary-value">
+            <Card className="p-6">
+              <h2 className="text-lg font-semibold mb-4">Excluded Firms Summary</h2>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">
+                <div className="p-4 rounded-lg bg-muted">
+                  <p className="text-sm text-muted-foreground">Total Firms</p>
+                  <p className="text-2xl font-bold">
                     {analytics.excluded_firms_summary.total_firms_after_dedup.toLocaleString()}
-                  </div>
+                  </p>
                 </div>
-                <div className="summary-card">
-                  <div className="summary-label">Included Firms</div>
-                  <div className="summary-value">
+                <div className="p-4 rounded-lg bg-muted">
+                  <p className="text-sm text-muted-foreground">Included Firms</p>
+                  <p className="text-2xl font-bold">
                     {analytics.excluded_firms_summary.included_firms_count.toLocaleString()}
-                  </div>
+                  </p>
                 </div>
-                <div className="summary-card">
-                  <div className="summary-label">Excluded Firms</div>
-                  <div className="summary-value">
+                <div className="p-4 rounded-lg bg-muted">
+                  <p className="text-sm text-muted-foreground">Excluded Firms</p>
+                  <p className="text-2xl font-bold">
                     {analytics.excluded_firms_summary.completely_excluded_firms_count.toLocaleString()}
-                  </div>
+                  </p>
                 </div>
-                <div className="summary-card">
-                  <div className="summary-label">Exclusion Rate</div>
-                  <div className="summary-value">
+                <div className="p-4 rounded-lg bg-muted">
+                  <p className="text-sm text-muted-foreground">Exclusion Rate</p>
+                  <p className="text-2xl font-bold">
                     {analytics.excluded_firms_summary.exclusion_rate_firms.toFixed(1)}%
-                  </div>
+                  </p>
                 </div>
               </div>
               {analytics?.excluded_firms_list && analytics.excluded_firms_list.length > 0 && (
-                <div className="export-buttons" style={{ marginTop: '1.5rem' }}>
-                  <button
-                    className="export-button"
-                    onClick={handleExportExcludedFirms}
-                    style={{ width: '100%' }}
-                  >
-                    Export Excluded Firms ({analytics.excluded_firms_list.length.toLocaleString()})
-                  </button>
-                </div>
+                <Button variant="outline" className="w-full" onClick={handleExportExcludedFirms}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Excluded Firms ({analytics.excluded_firms_list.length.toLocaleString()})
+                </Button>
               )}
-            </section>
+            </Card>
           )}
         </div>
       )}
     </div>
   );
 }
-
