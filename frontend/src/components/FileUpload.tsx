@@ -1,7 +1,11 @@
 import { useCallback, useState } from 'react';
 import FileValidationModal from './FileValidationModal';
-import type { FileValidationResult } from '../services/api';
-import './FileUpload.css';
+import type { FileValidationResult } from '@/services/api';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Upload, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // Extended file info that includes validation result
 export interface ValidatedFile {
@@ -92,9 +96,12 @@ export default function FileUpload({
   };
 
   return (
-    <div className="file-upload">
+    <div className="mb-8">
       <div
-        className={`upload-area ${isDragging ? 'dragging' : ''}`}
+        className={cn(
+          'border-2 border-dashed rounded-lg p-12 text-center bg-muted/50 transition-colors cursor-pointer',
+          isDragging && 'border-primary bg-primary/5'
+        )}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -105,63 +112,65 @@ export default function FileUpload({
           multiple
           accept=".xlsx,.xls"
           onChange={handleFileInput}
-          className="file-input"
+          className="hidden"
         />
-        <label htmlFor="file-input" className="upload-label">
-          <div className="upload-icon">📁</div>
-          <div className="upload-text">
+        <label htmlFor="file-input" className="block cursor-pointer">
+          <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <div className="text-base mb-2">
             <strong>Drop Excel files here</strong> or click to browse
           </div>
-          <div className="upload-hint">Supports .xlsx and .xls files</div>
+          <div className="text-sm text-muted-foreground">Supports .xlsx and .xls files</div>
         </label>
       </div>
 
       {uploadedFiles.length > 0 ? (
-        <div className="uploaded-files">
-          <h3>Uploaded Files ({uploadedFiles.length})</h3>
-          <div className="file-list">
+        <div className="mt-6">
+          <h3 className="text-base font-semibold mb-4">Uploaded Files ({uploadedFiles.length})</h3>
+          <div className="flex flex-col gap-2">
             {uploadedFiles.map((file, index) => {
               const validation = getFileValidation?.(file);
               return (
-                <div key={`${file.name}-${index}`} className="file-item">
-                  <div className="file-info-content">
-                    <span className="file-name">{file.name}</span>
-                    <span className="file-size">{formatFileSize(file.size)}</span>
+                <Card key={`${file.name}-${index}`} className="flex items-center gap-4 p-4">
+                  <div className="flex-1 flex flex-col gap-1 min-w-0">
+                    <span className="text-sm break-words">{file.name}</span>
+                    <span className="text-xs text-muted-foreground">{formatFileSize(file.size)}</span>
                     {validation && (
-                      <div className="file-validation-badges">
+                      <div className="flex flex-wrap gap-1 mt-1">
                         {validation.contacts_sheet && (
-                          <span className="validation-badge contacts">
+                          <Badge variant="secondary" className="bg-green-500/15 text-green-600 hover:bg-green-500/20">
                             ✓ Contacts
-                          </span>
+                          </Badge>
                         )}
                         {validation.accounts_sheet && (
-                          <span className="validation-badge accounts">
+                          <Badge variant="secondary" className="bg-blue-500/15 text-blue-600 hover:bg-blue-500/20">
                             ✓ Accounts
-                          </span>
+                          </Badge>
                         )}
                         {validation.can_merge_aum && (
-                          <span className="validation-badge aum">
+                          <Badge variant="secondary" className="bg-purple-500/15 text-purple-600 hover:bg-purple-500/20">
                             ✓ AUM
-                          </span>
+                          </Badge>
                         )}
                       </div>
                     )}
                   </div>
-                  <button
-                    className="file-remove"
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                     onClick={() => onRemoveFile(index)}
                     aria-label="Remove file"
                   >
-                    ×
-                  </button>
-                </div>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </Card>
               );
             })}
           </div>
         </div>
       ) : (
-        <div className="uploaded-files-placeholder">
-          <p className="placeholder-text">No files uploaded yet</p>
+        <div className="mt-6 p-4 text-center bg-muted/50 rounded-lg border border-dashed">
+          <p className="text-sm text-muted-foreground">No files uploaded yet</p>
         </div>
       )}
 
