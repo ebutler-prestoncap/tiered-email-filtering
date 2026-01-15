@@ -2,11 +2,11 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy package.json only (not package-lock.json to avoid platform mismatch)
+COPY package.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (generates fresh lock file for Alpine)
+RUN npm install
 
 # Copy application code
 COPY . .
